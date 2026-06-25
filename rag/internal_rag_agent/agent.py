@@ -1,6 +1,5 @@
 import os
 import io
-import json
 import logging
 from typing import TypedDict, Literal, List, Dict, Any, AsyncIterator, Optional
 from dotenv import load_dotenv
@@ -11,9 +10,22 @@ from supabase import create_client, Client
 
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from pypdf import PdfReader
+# M-005 Document Parser
+from document_parser import validate_file_format
+
+# M-006 Indexing Service
+from indexing_service import index_document, IndexJobStatus
+
+# M-007 RAG Search Service
+from rag_search_service import (
+    Source,
+    search_documents,
+    search_documents_by_metadata,
+    extract_sql_filters,
+    answer_from_documents,
+    build_list_response,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -42,59 +54,6 @@ def get_supabase() -> Client:
 
 
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-
-
-def get_embedding(text: str) -> List[float]:
-    """텍스트 임베딩 생성"""
-    return embeddings.embed_query(text)
-
-
-def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """PDF 바이너리에서 텍스트 추출"""
-    try:
-        pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
-        text_parts = []
-
-        for page_num, page in enumerate(pdf_reader.pages, 1):
-            page_text = page.extract_text()
-            if page_text:
-                text_parts.append(f"[페이지 {page_num}]\n{page_text}")
-
-        full_text = "\n\n".join(text_parts)
-        logger.info(f"[RAG AGENT] PDF 텍스트 추출 완료: {len(pdf_reader.pages)}페이지, {len(full_text)}자")
-        return full_text
-
-    except Exception as e:
-        logger.error(f"[RAG AGENT] [ERROR] PDF 텍스트 추출 실패: {e}")
-        raise
-
-
-def extract_text_from_bytes(file_bytes: bytes, mime_type: str = "") -> str:
-    """
-    바이너리 데이터에서 텍스트 추출
-
-    Args:
-        file_bytes: 파일 바이너리 데이터
-        mime_type: 파일의 MIME 타입 (예: application/pdf)
-
-    Returns:
-        추출된 텍스트
-    """
-    try:
-        if "pdf" in mime_type.lower():
-            return extract_text_from_pdf(file_bytes)
-        else:
-            try:
-                return file_bytes.decode('utf-8')
-            except UnicodeDecodeError:
-                try:
-                    return file_bytes.decode('cp949')
-                except UnicodeDecodeError:
-                    return file_bytes.decode('latin-1')
-    except Exception as e:
-        logger.error(f"[RAG AGENT] [ERROR] 텍스트 추출 실패: {e}")
-        raise
 
 
 # ============================================================================
@@ -383,403 +342,91 @@ def search_router(state: RAGState) -> RAGState:
 
 
 def vector_search(state: RAGState) -> RAGState:
-    """
-    벡터 유사도 검색 (의미 기반)
-    """
+    """벡터 유사도 검색 — M-007 search_documents() 위임"""
     logger.info("[RAG AGENT] [VECTOR SEARCH] 시작")
-    question = state["question"] # [ 1 ]
-
-    query_embedding = get_embedding(question)
-
-    sb = get_supabase()
-
-    try:
-        # match_documents RPC 함수 호출
-        response = sb.rpc("match_documents", { # [ 2 ]
-            "query_embedding": query_embedding,
-            "match_count": 5
-        }).execute()
-
-        results = response.data or []
-    except Exception as e:
-        logger.error(f"[RAG AGENT] [ERROR] 벡터 검색 오류: {e}")
-        # RPC 함수가 없으면 직접 쿼리 (fallback)
-        results = []
-
-    logger.info(f"[RAG AGENT] [VECTOR SEARCH] 검색 결과: {len(results)}개")
-
-    sources = [ # [ 3 ]
-        {
-            "storage_ref": r.get("storage_ref", ""),
-            "filename": r.get("filename", ""),
-            "chunk_index": r.get("chunk_index", 0),
-            "similarity": r.get("similarity", 0)
-        }
-        for r in results
-    ]
-
-    return {"search_results": results, "sources": sources}
-
-
-def _get_today_iso() -> str: # [ 1 ]
-    from datetime import date
-    return date.today().isoformat()
+    results, sources = search_documents(state["question"], get_supabase())
+    return {"search_results": results, "sources": [s.to_dict() for s in sources]}
 
 
 def sql_search(state: RAGState) -> RAGState:
-    """
-    SQL 조건 검색 (메타데이터 필터)
-    """
+    """SQL 메타데이터 검색 — M-007 search_documents_by_metadata() 위임"""
     logger.info("[RAG AGENT] [SQL SEARCH] 시작")
-    question = state["question"] # [ 2 ]
-
-    messages = [
-        {
-            "role": "user",
-            "content": f"""다음 질문에서 검색 조건을 JSON으로 추출하세요.
-질문: {question}
-
-사용 가능한 필드:
-1. document_type: 파일 형식 (허용 값: pdf, text, markdown, docx, doc, xlsx, xls)
-2. filename_contains: 파일명에 포함된 키워드 (예: "SPRi", "Brief", "AI")
-3. created_after: 이 날짜 이후 인덱싱된 문서 (ISO 형식: "YYYY-MM-DD")
-4. created_before: 이 날짜 이전 인덱싱된 문서 (ISO 형식: "YYYY-MM-DD")
-5. list_all: true면 모든 문서 목록 반환
-
-예시:
-- "PDF 문서만" -> {{"document_type": "pdf"}}
-- "파일명에 AI가 들어간 파일 목록" -> {{"filename_contains": "AI"}}
-- "인덱싱된 모든 파일" -> {{"list_all": true}}
-- "2025년 12월 문서" -> {{"created_after": "2025-12-01", "created_before": "2025-12-31"}}
-
-참고: 오늘 날짜는 {_get_today_iso()}입니다.
-
-조건을 추출할 수 없으면 빈 객체 {{}}를 반환하세요.
-JSON만 응답:"""
-        }
-    ]
-
-    try:
-        response = llm.invoke(messages) # [ 3 ]
-        filters = json.loads(response.content.strip())
-    except (json.JSONDecodeError, Exception) as e:
-        logger.error(f"[RAG AGENT] [ERROR] 조건 추출 실패: {e}")
-        filters = {}
-
+    filters = extract_sql_filters(state["question"])
     logger.info(f"[RAG AGENT] [SQL SEARCH] 추출된 조건: {filters}")
-
-    sb = get_supabase()
-
-    try: # [ 4 ]
-        query = sb.table("documents").select("storage_ref, filename, document_type, created_at, content")
-
-        # document_type 필터
-        if filters.get("document_type"):
-            query = query.eq("document_type", filters["document_type"])
-
-        # filename 키워드 검색 (ILIKE)
-        if filters.get("filename_contains"):
-            query = query.ilike("filename", f"%{filters['filename_contains']}%")
-
-        # created_at 날짜 필터
-        if filters.get("created_after"):
-            query = query.gte("created_at", filters["created_after"])
-        if filters.get("created_before"):
-            query = query.lte("created_at", filters["created_before"])
-
-        # 기본: chunk_index=0 (unique filename)이거나 list_all=true면 전체
-        if not filters.get("list_all"):
-            query = query.eq("chunk_index", 0)
-
-        resp = query.order("created_at", desc=True).limit(20).execute()
-        results = resp.data or []
-    except Exception as e:
-        logger.error(f"[RAG AGENT] [ERROR] SQL 검색 오류: {e}")
-        results = []
-
-    logger.info(f"[RAG AGENT] [SQL SEARCH] 검색 결과: {len(results)}개")
-
-    sources = [ # [ 5 ]
-        {
-            "storage_ref": r.get("storage_ref", ""),
-            "filename": r.get("filename", ""),
-            "document_type": r.get("document_type", ""),
-            "created_at": r.get("created_at", "")
-        }
-        for r in results
-    ]
-
-    return {"search_results": results, "sources": sources}
+    results, sources = search_documents_by_metadata(get_supabase(), filters)
+    return {"search_results": results, "sources": [s.to_dict() for s in sources]}
 
 
 def generate(state: RAGState) -> RAGState:
+    """답변 생성 — M-007 answer_from_documents() / build_list_response() 위임"""
     logger.info("[RAG AGENT] [GENERATE] 시작")
     question = state["question"]
     search_type = state.get("search_type", "vector")
     search_results = state.get("search_results", [])
-    sources = state.get("sources", [])
+    raw_sources = state.get("sources", [])
+    sources = [Source(**s) for s in raw_sources]  # dict → Source 객체
 
     if not search_results:
-        return {
-            "answer": "관련 문서를 찾을 수 없습니다. 다른 검색어로 시도해주세요.",
-            "sources": []
-        }
+        return {"answer": "관련 문서를 찾을 수 없습니다. 다른 검색어로 시도해주세요.", "sources": raw_sources}
 
-    # SQL 검색 결과일 때: 목록 형태로 응답 (LLM 호출 없이)
     if search_type == "sql":
-        return _generate_list_response(search_results, sources)
+        answer = build_list_response(search_results, sources)      # M-007
+    else:
+        answer = answer_from_documents(question, search_results, sources)  # M-007
 
-    # Vector 검색 결과일 때: 내용 기반 답변 생성
-    return _generate_content_response(question, search_results, sources)
-
-
-def _generate_list_response(search_results: List[Dict], sources: List[Dict]) -> RAGState:
-    """
-    SQL 검색 결과를 목록 형태로 응답 (메타데이터 기반)
-    """
-    logger.info("[RAG AGENT] [GENERATE] 목록 응답 생성")
-
-    answer_parts = [f"**검색 결과: {len(search_results)}개 문서**\n"]
-
-    seen_files = set()
-    for i, s in enumerate(sources, 1):
-        filename = s.get("filename", "unknown")
-        if filename in seen_files:
-            continue
-        seen_files.add(filename)
-
-        storage_ref = s.get("storage_ref", "")
-        doc_type = s.get("document_type", "")
-        created_at = s.get("created_at", "")
-
-        # 날짜 포맷팅
-        if created_at:
-            try:
-                from datetime import datetime
-                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                created_at = dt.strftime("%Y-%m-%d %H:%M")
-            except:
-                pass
-
-        answer_parts.append(f"{i}. **{filename}**")
-        if doc_type:
-            answer_parts.append(f"   - 형식: {doc_type}")
-        if created_at:
-            answer_parts.append(f"   - 인덱싱: {created_at}")
-        if storage_ref:
-            gdrive_url = _storage_ref_to_url(storage_ref)
-            if gdrive_url:
-                answer_parts.append(f"   - 위치: {gdrive_url}")
-        answer_parts.append("")
-
-    return {
-        "answer": "\n".join(answer_parts),
-        "sources": sources
-    }
-
-
-def _generate_content_response(question: str, search_results: List[Dict], sources: List[Dict]) -> RAGState:
-    """
-    Vector 검색 결과를 기반으로 내용 답변 생성 (LLM 호출)
-    """
-    logger.info("[RAG AGENT] [GENERATE] 내용 답변 생성")
-
-    context_parts = [] # [ 1 ]
-    for r in search_results:
-        filename = r.get("filename", "unknown")
-        content = r.get("content", "")
-        context_parts.append(f"[{filename}]\n{content}")
-
-    context = "\n\n---\n\n".join(context_parts)
-
-    messages = [ # [ 2 ]
-        {
-            "role": "user",
-            "content": f"""당신은 사내 문서 기반 RAG 전문가입니다.
-아래 참고 문서를 바탕으로 질문에 정확하게 답변하세요.
-
-## 참고 문서
-{context}
-
-## 질문
-{question}
-
-## 지시사항
-- 문서에 있는 정보만 사용하세요
-- 출처 문서명을 명시하세요
-"""
-        }
-    ]
-
-    generate_llm = ChatOpenAI(model="gpt-4o")
-    response = generate_llm.invoke(messages)
-    answer = response.content
-
-    source_info = "\n\n**출처:**\n" # [ 3 ]
-    seen = set()
-    for s in sources:
-        filename = s.get("filename", "")
-        storage_ref = s.get("storage_ref", "")
-        if filename and filename not in seen:
-            source_info += f"- {filename}"
-            if storage_ref:
-                # storage_ref를 Google Drive URL로 변환
-                gdrive_url = _storage_ref_to_url(storage_ref)
-                if gdrive_url:
-                    source_info += f"\n  파일 위치: {gdrive_url}"
-                else:
-                    source_info += f" (`{storage_ref}`)"
-            source_info += "\n"
-            seen.add(filename)
-
-    return {"answer": answer + source_info, "sources": sources}
-
-
-def _storage_ref_to_url(storage_ref: str) -> Optional[str]:
-    """
-    storage_ref를 Google Drive 웹 URL로 변환
-
-    Args:
-        storage_ref: gdrive://file/xxx 형식
-
-    Returns:
-        Google Drive URL 또는 None
-    """
-    if not storage_ref:
-        return None
-
-    file_id = None
-    if storage_ref.startswith("gdrive://file/"):
-        file_id = storage_ref.replace("gdrive://file/", "")
-    elif storage_ref.startswith("gdrive://"):
-        file_id = storage_ref.replace("gdrive://", "")
-
-    if file_id:
-        return f"https://drive.google.com/file/d/{file_id}/view"
-    return None
+    return {"answer": answer, "sources": raw_sources}
 
 
 def index_document_node(state: RAGState) -> RAGState:
+    """문서 인덱싱 — M-006 index_document() 위임"""
     logger.info("[RAG AGENT] [INDEX] 시작")
 
-    index_request = state.get("index_request", {}) # [ 1 ]
-    logger.info(f"[RAG AGENT] [INDEX] index_request keys: {list(index_request.keys()) if index_request else 'None'}")
-
+    index_request = state.get("index_request", {})
     if not index_request:
-        return {
-            "index_result": {"status": "error", "message": "인덱싱 요청 데이터가 없습니다."},
-            "answer": "인덱싱 요청 데이터가 없습니다."
-        }
+        return {"index_result": {"status": "error", "message": "인덱싱 요청 데이터가 없습니다."}, "answer": "인덱싱 요청 데이터가 없습니다."}
 
-    files_to_index = index_request.get("files", []) # [ 2 ]
-
+    files_to_index = index_request.get("files", [])
     if not files_to_index:
-        return {
-            "index_result": {"status": "error", "message": "인덱싱할 파일이 없습니다."},
-            "answer": "인덱싱할 파일이 없습니다."
-        }
+        return {"index_result": {"status": "error", "message": "인덱싱할 파일이 없습니다."}, "answer": "인덱싱할 파일이 없습니다."}
 
     logger.info(f"[RAG AGENT] [INDEX] {len(files_to_index)}개 파일 처리")
-
-    sb = get_supabase() # [ 3 ]
+    sb = get_supabase()
     all_results = []
 
     for file_info in files_to_index:
         storage_ref = file_info.get("storage_ref", "")
         filename = file_info.get("filename", "")
-
         logger.info(f"[RAG AGENT] [INDEX] 파일 처리 중: {filename} ({storage_ref})")
 
         try:
-            result = _index_single_file(sb, storage_ref, filename)
-            all_results.append(result)
-            logger.info(f"[RAG AGENT] [INDEX] 완료: {filename}, 청크 {result['chunk_count']}개")
+            file_bytes, downloaded_filename, mime_type = download_by_storage_ref(storage_ref)
+            # M-006: 파싱(M-005) + 청크 분할 + 임베딩 + 저장 + 중복 방지(F-011)
+            job = index_document(
+                sb=sb,
+                storage_ref=storage_ref,
+                filename=downloaded_filename or filename,
+                file_bytes=file_bytes,
+                mime_type=mime_type,
+            )
+            all_results.append(job.to_dict())
+            logger.info(f"[RAG AGENT] [INDEX] {job.status.value}: {job.filename}, 청크 {job.chunk_count}개")
         except Exception as e:
-            logger.error(f"[RAG AGENT] [INDEX] [ERROR] 실패: {filename}, 오류: {e}")
-            all_results.append({
-                "status": "error",
-                "filename": filename,
-                "storage_ref": storage_ref,
-                "error": str(e)
-            })
+            logger.error(f"[RAG AGENT] [INDEX] [ERROR] 다운로드 실패: {filename}, {e}")
+            all_results.append({"status": "error", "filename": filename, "storage_ref": storage_ref, "chunk_count": 0, "error": str(e)})
 
-    # 결과 요약
-    success_count = sum(1 for r in all_results if r.get("status") == "success") # [ 4 ]
+    success_count = sum(1 for r in all_results if r.get("status") == IndexJobStatus.SUCCESS.value)
+    skip_count = sum(1 for r in all_results if r.get("status") == IndexJobStatus.SKIPPED.value)
 
-    answer_parts = [f"✅ 문서 인덱싱 완료 ({success_count}/{len(all_results)}개 성공)"]
+    answer_parts = [f"✅ 문서 인덱싱 완료 ({success_count}/{len(all_results)}개 성공, {skip_count}개 중복 스킵)"]
     for r in all_results:
-        if r.get("status") == "success":
+        if r.get("status") == IndexJobStatus.SUCCESS.value:
             answer_parts.append(f"  {r['filename']}: {r['chunk_count']}개 청크")
+        elif r.get("status") == IndexJobStatus.SKIPPED.value:
+            answer_parts.append(f"  {r['filename']}: 이미 인덱싱됨 (스킵)")
         else:
             answer_parts.append(f"  {r.get('filename', 'unknown')}: {r.get('error', '알 수 없는 오류')}")
 
-    return {
-        "index_result": {"status": "success", "results": all_results},
-        "answer": "\n".join(answer_parts)
-    }
-
-
-def _index_single_file(sb, storage_ref: str, filename: str) -> dict:
-    """
-    단일 파일 인덱싱 헬퍼 함수
-
-    Returns:
-        {"status": "success", "filename": ..., "storage_ref": ..., "chunk_count": ...}
-    """
-    file_bytes, downloaded_filename, mime_type = download_by_storage_ref(storage_ref) # [ 1 ]
-    filename = downloaded_filename
-
-    content = extract_text_from_bytes(file_bytes, mime_type)
-    logger.info(f"[RAG AGENT] [INDEX] 텍스트 추출: {filename}, {len(content)}자")
-
-    if not content:
-        raise ValueError("텍스트 추출 결과가 비어있습니다.")
-
-    # MIME 타입에서 document_type 자동 추론
-    mime_to_doctype = { # [ 2 ]
-        "application/pdf": "pdf",
-        "text/plain": "text",
-        "text/markdown": "markdown",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-        "application/msword": "doc",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-        "application/vnd.ms-excel": "xls",
-    }
-
-    document_type = mime_to_doctype.get(mime_type)
-    if not document_type and filename and '.' in filename:
-        document_type = filename.rsplit('.', 1)[-1].lower()
-
-    text_splitter = RecursiveCharacterTextSplitter( # [ 3 ]
-        chunk_size=500,
-        chunk_overlap=50,
-    )
-    chunks = text_splitter.split_text(content)
-    logger.info(f"[RAG AGENT] [INDEX] 청크 수: {len(chunks)}")
-
-    # 각 청크 임베딩 및 저장
-    for i, chunk in enumerate(chunks): # [ 4 ]
-        embedding = get_embedding(chunk)
-
-        data = {
-            "content": chunk,
-            "embedding": embedding,
-            "filename": filename,
-            "storage_ref": storage_ref,
-            "chunk_index": i,
-        }
-
-        if document_type:
-            data["document_type"] = document_type
-
-        sb.table("documents").insert(data).execute()
-
-    return { # [ 5 ]
-        "status": "success",
-        "filename": filename,
-        "storage_ref": storage_ref,
-        "chunk_count": len(chunks)
-    }
+    return {"index_result": {"status": "success", "results": all_results}, "answer": "\n".join(answer_parts)}
 
 
 # ============================================================================
