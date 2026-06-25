@@ -15,7 +15,10 @@ from a2a.types import (
     AgentCard,
     AgentSkill,
 )
-from agent_executor import WebResearchAgentExecutor
+try:
+    from .agent_executor import WebResearchAgentExecutor
+except ImportError:
+    from agent_executor import WebResearchAgentExecutor
 
 
 def create_agent_card() -> AgentCard:
