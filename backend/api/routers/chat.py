@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 import os
@@ -7,17 +8,14 @@ from typing import AsyncIterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-# common 패키지 경로 추가
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from common.a2a_client import A2AClientWrapper
-from common.config import get_agent_urls
 from backend.api.db import get_supabase
 from backend.api.schemas import ChatRequest, ChatResponse
 
 router = APIRouter()
 
-# A2A 클라이언트 (앱 시작 시 초기화)
 _a2a_client: A2AClientWrapper = None
 
 
@@ -29,10 +27,21 @@ async def get_a2a_client() -> A2AClientWrapper:
     return _a2a_client
 
 
-# ── 대화 기록 헬퍼 ─────────────────────────────────
+# ── Supabase 헬퍼 (동기) ───────────────────────────
 
-def _load_history(session_id: str, limit: int = 10) -> str:
-    """최근 N개 메시지를 텍스트로 반환"""
+def _ensure_session_sync(session_id: str | None, first_message: str) -> str:
+    if session_id:
+        return session_id
+    sb = get_supabase()
+    new_id = uuid4().hex
+    sb.table("chat_sessions").insert({
+        "id": new_id,
+        "title": first_message[:40],
+    }).execute()
+    return new_id
+
+
+def _load_history_sync(session_id: str, limit: int = 10) -> str:
     sb = get_supabase()
     rows = (
         sb.table("chat_messages")
@@ -43,17 +52,16 @@ def _load_history(session_id: str, limit: int = 10) -> str:
         .execute()
         .data
     )
-    rows.reverse()  # 오래된 순으로
+    rows.reverse()
     if not rows:
         return ""
-    lines = [
+    return "\n".join([
         f"{'사용자' if r['role'] == 'user' else '어시스턴트'}: {r['content']}"
         for r in rows
-    ]
-    return "\n".join(lines)
+    ])
 
 
-def _save_message(session_id: str, role: str, content: str) -> None:
+def _save_message_sync(session_id: str, role: str, content: str) -> None:
     sb = get_supabase()
     sb.table("chat_messages").insert({
         "id": uuid4().hex,
@@ -63,34 +71,27 @@ def _save_message(session_id: str, role: str, content: str) -> None:
     }).execute()
 
 
-def _ensure_session(session_id: str | None, first_message: str) -> str:
-    """세션이 없으면 새로 생성, 있으면 그대로 반환"""
-    sb = get_supabase()
-    if session_id:
-        return session_id
+# ── 비동기 래퍼 ────────────────────────────────────
 
-    new_id = uuid4().hex
-    title = first_message[:40]  # 첫 메시지 앞 40자를 제목으로
-    sb.table("chat_sessions").insert({
-        "id": new_id,
-        "title": title,
-    }).execute()
-    return new_id
+async def _ensure_session(session_id, message):
+    return await asyncio.to_thread(_ensure_session_sync, session_id, message)
+
+async def _load_history(session_id):
+    return await asyncio.to_thread(_load_history_sync, session_id)
+
+async def _save_message(session_id, role, content):
+    await asyncio.to_thread(_save_message_sync, session_id, role, content)
 
 
 # ── 엔드포인트 ─────────────────────────────────────
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    """일반 요청/응답"""
-    session_id = _ensure_session(req.session_id, req.message)
-
-    # 이전 대화 불러오기
-    history = _load_history(session_id)
+    session_id = await _ensure_session(req.session_id, req.message)
+    history = await _load_history(session_id)
     prompt = f"[이전 대화]\n{history}\n\n[현재 질문]\n{req.message}" if history else req.message
 
-    # user 메시지 저장
-    _save_message(session_id, "user", req.message)
+    await _save_message(session_id, "user", req.message)
 
     try:
         client = await get_a2a_client()
@@ -99,12 +100,8 @@ async def chat(req: ChatRequest):
         if not response.success:
             raise HTTPException(status_code=500, detail=response.error)
 
-        answer = ""
-        if response.artifacts:
-            answer = response.artifacts[0].get("text", "")
-
-        # assistant 메시지 저장
-        _save_message(session_id, "assistant", answer)
+        answer = response.artifacts[0].get("text", "") if response.artifacts else ""
+        await _save_message(session_id, "assistant", answer)
 
         return ChatResponse(answer=answer, session_id=session_id)
 
@@ -116,20 +113,20 @@ async def chat(req: ChatRequest):
 
 @router.get("/chat/stream")
 async def chat_stream(message: str, session_id: str | None = None):
-    """SSE — A2A blocking send_message 결과를 스트리밍으로 반환"""
-    resolved_session_id = _ensure_session(session_id, message)
-    history = _load_history(resolved_session_id)
-    prompt = f"[이전 대화]\n{history}\n\n[현재 질문]\n{message}" if history else message
-
-    _save_message(resolved_session_id, "user", message)
+    """SSE 스트리밍"""
 
     async def generate() -> AsyncIterator[str]:
         try:
-            client = await get_a2a_client()
+            # Supabase 작업을 스레드에서 실행
+            resolved_id = await _ensure_session(session_id, message)
+            history = await _load_history(resolved_id)
+            prompt = f"[이전 대화]\n{history}\n\n[현재 질문]\n{message}" if history else message
 
-            # 처리 중 상태 전송
+            await _save_message(resolved_id, "user", message)
+
             yield f"data: {json.dumps({'type': 'status', 'state': 'working'})}\n\n"
 
+            client = await get_a2a_client()
             response = await client.send_message("orchestrator", prompt)
 
             if not response.success:
@@ -137,13 +134,10 @@ async def chat_stream(message: str, session_id: str | None = None):
                 yield "data: [DONE]\n\n"
                 return
 
-            answer = ""
-            if response.artifacts:
-                answer = response.artifacts[0].get("text", "")
+            answer = response.artifacts[0].get("text", "") if response.artifacts else ""
+            await _save_message(resolved_id, "assistant", answer)
 
-            _save_message(resolved_session_id, "assistant", answer)
-
-            yield f"data: {json.dumps({'type': 'answer', 'content': answer, 'session_id': resolved_session_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'answer', 'content': answer, 'session_id': resolved_id})}\n\n"
 
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
@@ -153,8 +147,5 @@ async def chat_stream(message: str, session_id: str | None = None):
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
