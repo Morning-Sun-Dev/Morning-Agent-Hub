@@ -11,7 +11,7 @@ M-005 Document Parser
 import io
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Dict, Any, List, Optional
 
 from pypdf import PdfReader
 
@@ -49,7 +49,6 @@ MIME_TO_DOCTYPE: Dict[str, str] = {
 # 데이터 모델
 # ============================================================================
 
-
 @dataclass
 class ParsedDocument:
     """
@@ -64,7 +63,6 @@ class ParsedDocument:
         chunk_source_metadata: 페이지/섹션 단위 소스 메타데이터 리스트
             각 항목: {"page_number": int, "char_offset": int, "char_count": int}
     """
-
     text: str
     filename: str
     mime_type: str
@@ -76,7 +74,6 @@ class ParsedDocument:
 # ============================================================================
 # 내부 파싱 함수
 # ============================================================================
-
 
 def _extract_text_from_pdf(pdf_bytes: bytes) -> tuple[str, int, List[Dict[str, Any]]]:
     """
@@ -96,19 +93,15 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> tuple[str, int, List[Dict[str, A
             if page_text:
                 block = f"[페이지 {page_num}]\n{page_text}"
                 text_parts.append(block)
-                page_metadata.append(
-                    {
-                        "page_number": page_num,
-                        "char_offset": cumulative_offset,
-                        "char_count": len(block),
-                    }
-                )
+                page_metadata.append({
+                    "page_number": page_num,
+                    "char_offset": cumulative_offset,
+                    "char_count": len(block),
+                })
                 cumulative_offset += len(block) + 2  # "\n\n" separator
 
         full_text = "\n\n".join(text_parts)
-        logger.info(
-            f"[DOC PARSER] PDF 추출 완료: {len(pdf_reader.pages)}페이지, {len(full_text)}자"
-        )
+        logger.info(f"[DOC PARSER] PDF 추출 완료: {len(pdf_reader.pages)}페이지, {len(full_text)}자")
         return full_text, len(pdf_reader.pages), page_metadata
 
     except Exception as e:
@@ -127,7 +120,6 @@ def _resolve_doctype(mime_type: str, filename: str) -> Optional[str]:
 # ============================================================================
 # 공개 인터페이스
 # ============================================================================
-
 
 def validate_file_format(mime_type: str = "", filename: str = "") -> bool:
     """
@@ -184,9 +176,7 @@ def parse_document(
     chunk_source_metadata: List[Dict[str, Any]] = []
 
     try:
-        is_pdf = "pdf" in mime_type.lower() or (
-            filename and filename.lower().endswith(".pdf")
-        )
+        is_pdf = "pdf" in mime_type.lower() or (filename and filename.lower().endswith(".pdf"))
 
         if is_pdf:
             text, page_count, chunk_source_metadata = _extract_text_from_pdf(file_bytes)

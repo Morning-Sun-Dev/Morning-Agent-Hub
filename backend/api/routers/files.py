@@ -68,11 +68,17 @@ async def upload_and_index(file: UploadFile = File(...)):
             file_bytes=file_bytes,
             mime_type=mime_type,
         )
+        if job.error:
+            index_message = job.error
+        elif job.status.value == "skipped":
+            index_message = "이미 인덱싱됨 (스킵)"
+        else:
+            index_message = f"{job.chunk_count}개 청크 저장 완료"
         return UploadResult(
             filename=filename,
             storage_ref=storage_ref,
             index_status=job.status.value,
-            index_message=job.error or f"{job.chunk_count}개 청크 저장 완료",
+            index_message=index_message,
         )
     except Exception as e:
         # 인덱싱 실패해도 업로드는 성공했으므로 부분 성공으로 반환
