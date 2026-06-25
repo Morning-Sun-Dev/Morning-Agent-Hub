@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from common.a2a_client import A2AClientWrapper
-from backend.api.db import get_supabase
+from backend.api.db import get_supabase_service as get_supabase
 from backend.api.schemas import ChatRequest, ChatResponse
 
 router = APIRouter()

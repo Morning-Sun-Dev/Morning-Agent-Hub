@@ -39,18 +39,31 @@ INTENT_INDEX = "index"      # 문서 인덱싱
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 supabase: Client = None
+supabase_service: Client = None
 
 
 def get_supabase() -> Client:
-    """Supabase 클라이언트 싱글톤"""
+    """Supabase 클라이언트 싱글톤 (SELECT용 — anon key)"""
     global supabase
     if supabase is None:
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise ValueError("SUPABASE_URL, SUPABASE_KEY 환경변수 필요")
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     return supabase
+
+
+def get_supabase_service() -> Client:
+    """Supabase service_role 클라이언트 싱글톤 (INSERT용 — RLS 우회)"""
+    global supabase_service
+    if supabase_service is None:
+        key = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_KEY
+        if not SUPABASE_URL or not key:
+            raise ValueError("SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY 환경변수 필요")
+        supabase_service = create_client(SUPABASE_URL, key)
+    return supabase_service
 
 
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -390,7 +403,7 @@ def index_document_node(state: RAGState) -> RAGState:
         return {"index_result": {"status": "error", "message": "인덱싱할 파일이 없습니다."}, "answer": "인덱싱할 파일이 없습니다."}
 
     logger.info(f"[RAG AGENT] [INDEX] {len(files_to_index)}개 파일 처리")
-    sb = get_supabase()
+    sb = get_supabase_service()
     all_results = []
 
     for file_info in files_to_index:

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from typing import List
 
-from backend.api.db import get_supabase
+from backend.api.db import get_supabase_service as get_supabase
 from backend.api.schemas import SessionOut, MessageOut
 
 router = APIRouter()

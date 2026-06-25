@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(ROOT, "ai_llm", "internal_rag_agent"))
 
 from gdrive_client import get_gdrive_client
 from indexing_service import index_document
-from backend.api.db import get_supabase
+from backend.api.db import get_supabase_service
 
 router = APIRouter()
 
@@ -60,7 +60,7 @@ async def upload_and_index(file: UploadFile = File(...)):
 
     # ── Step 2: 벡터 DB 인덱싱 ──────────────────────
     try:
-        sb = get_supabase()
+        sb = get_supabase_service()
         job = index_document(
             sb=sb,
             storage_ref=storage_ref,
