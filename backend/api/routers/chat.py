@@ -116,7 +116,7 @@ async def chat(req: ChatRequest):
 
 @router.get("/chat/stream")
 async def chat_stream(message: str, session_id: str | None = None):
-    """SSE 스트리밍"""
+    """SSE — A2A blocking send_message 결과를 스트리밍으로 반환"""
     resolved_session_id = _ensure_session(session_id, message)
     history = _load_history(resolved_session_id)
     prompt = f"[이전 대화]\n{history}\n\n[현재 질문]\n{message}" if history else message
@@ -124,26 +124,29 @@ async def chat_stream(message: str, session_id: str | None = None):
     _save_message(resolved_session_id, "user", message)
 
     async def generate() -> AsyncIterator[str]:
-        client = await get_a2a_client()
-        full_answer = []
+        try:
+            client = await get_a2a_client()
 
-        async for event in client.send_streaming_message("orchestrator", prompt):
-            if "error" in event:
-                yield f"data: {json.dumps({'type': 'error', 'content': event['error']})}\n\n"
+            # 처리 중 상태 전송
+            yield f"data: {json.dumps({'type': 'status', 'state': 'working'})}\n\n"
+
+            response = await client.send_message("orchestrator", prompt)
+
+            if not response.success:
+                yield f"data: {json.dumps({'type': 'error', 'content': response.error})}\n\n"
+                yield "data: [DONE]\n\n"
                 return
 
-            if event.get("type") == "status":
-                yield f"data: {json.dumps({'type': 'status', 'state': event.get('state', '')})}\n\n"
+            answer = ""
+            if response.artifacts:
+                answer = response.artifacts[0].get("text", "")
 
-            elif event.get("type") == "artifact":
-                text = event.get("text", "")
-                if text:
-                    full_answer.append(text)
-                    yield f"data: {json.dumps({'type': 'answer', 'content': text, 'session_id': resolved_session_id})}\n\n"
+            _save_message(resolved_session_id, "assistant", answer)
 
-        # 스트리밍 완료 후 전체 답변 저장
-        if full_answer:
-            _save_message(resolved_session_id, "assistant", "".join(full_answer))
+            yield f"data: {json.dumps({'type': 'answer', 'content': answer, 'session_id': resolved_session_id})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 
         yield "data: [DONE]\n\n"
 
