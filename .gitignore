@@ -1,0 +1,18 @@
+# 환경변수
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Google Drive 인증
+credentials.json
+token.json
+
+# 기타
+.DS_Store
+*.log
