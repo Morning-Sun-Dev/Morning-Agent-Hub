@@ -11,6 +11,7 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    Orchestrator Agent (Port: 10010)                      │
 │  • Intent 분석 (LLM)  • Plan 생성  • A2A Client로 Remote Agent 호출      │
+│  • 병렬/순차 실행  • 실행 Trace 추적                                      │
 └─────────────────────────────────────┬───────────────────────────────────┘
                                       │ A2A Protocol
           ┌───────────┬───────────┬───┴───┬───────────┐
@@ -24,8 +25,8 @@
 
 | 에이전트 | 포트 | 역할 |
 |---------|------|------|
-| Orchestrator | 10010 | Intent 분석, 플랜 생성, 에이전트 조율 |
-| Web Research | 10011 | Tavily MCP 기반 웹/뉴스 검색 |
+| Orchestrator | 10010 | Intent 분석, 플랜 생성, 에이전트 조율, 실행 Trace |
+| Web Research | 10011 | Tavily MCP 기반 웹/뉴스 검색, 출처 추출 |
 | Internal RAG | 10012 | Supabase pgvector 기반 사내 문서 검색/인덱싱 |
 | File Management | 10013 | Google Drive 파일 관리 |
 | **Report Writing** | **10014** | **양식 기반 보고서 작성 (FastAPI)** |
@@ -91,7 +92,7 @@ python start_agents.py
 모든 에이전트를 별도 콘솔 창에서 시작합니다. 이후 FastAPI 백엔드를 실행합니다:
 
 ```bash
-python backend/main.py
+python -m backend.api.main
 ```
 
 ### 방법 2: 개별 시작
@@ -99,12 +100,12 @@ python backend/main.py
 각 터미널에서 순서대로 실행:
 
 ```bash
-cd web_research_agent && python agent_server.py      # :10011
-cd internal_rag_agent && python agent_server.py      # :10012
-cd file_management_agent && python agent_server.py   # :10013
-cd report_writing_agent && python agent_server.py    # :10014 (FastAPI)
-cd orchestrator_agent && python agent_server.py      # :10010
-python backend/main.py                               # :8000
+cd ai_llm/web_research_agent && python agent_server.py      # :10011
+cd ai_llm/internal_rag_agent && python agent_server.py      # :10012
+cd ai_llm/file_management_agent && python agent_server.py   # :10013
+cd ai_llm/report_writing_agent && python agent_server.py    # :10014
+cd ai_llm/orchestrator_agent && python agent_server.py      # :10010
+python -m backend.api.main                                  # :8000
 ```
 
 ### FastAPI 백엔드 API
@@ -138,16 +139,16 @@ CHAP11_final-project/
 ├── requirements.txt
 ├── start_agents.py             # 에이전트 일괄 시작
 ├── test_client.py              # CLI 테스트 클라이언트
+├── .github/                    # CI, PR/Issue 템플릿
 ├── backend/
-│   └── main.py                 # FastAPI REST API 게이트웨이 (:8000)
-├── common/                     # 공통 스키마, 설정
-├── orchestrator_agent/         # Host Agent (:10010)
-├── web_research_agent/         # Remote Agent (:10011)
-├── internal_rag_agent/         # Remote Agent (:10012)
-├── file_management_agent/      # Remote Agent (:10013)
-└── report_writing_agent/       # Remote Agent (:10014, FastAPI)
-    ├── agent.py
-    ├── agent_executor.py
-    ├── agent_server.py
-    └── templates.py            # 보고서 양식 정의
+│   ├── main.py                 # 레거시 FastAPI 게이트웨이 (:8000)
+│   └── api/                    # REST API (세션, 채팅, 파일 업로드)
+├── frontend/                   # Vue.js 웹 UI
+├── common/                     # 공통 스키마, 설정, A2A 클라이언트
+└── ai_llm/
+    ├── orchestrator_agent/     # Host Agent (:10010)
+    ├── web_research_agent/     # Remote Agent (:10011)
+    ├── internal_rag_agent/     # Remote Agent (:10012)
+    ├── file_management_agent/  # Remote Agent (:10013)
+    └── report_writing_agent/   # Remote Agent (:10014)
 ```

@@ -231,7 +231,7 @@ async def list_report_templates():
     from pathlib import Path
 
     project_root = Path(__file__).resolve().parent.parent
-    sys.path.insert(0, str(project_root / "report_writing_agent"))
+    sys.path.insert(0, str(project_root / "ai_llm" / "report_writing_agent"))
 
     from templates import list_templates
 

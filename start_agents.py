@@ -14,36 +14,37 @@ import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+AI_LLM_ROOT = PROJECT_ROOT / "ai_llm"
 
 AGENTS = {
     "web": {
         "name": "Web Research Agent",
         "port": 10011,
-        "dir": "web_research_agent",
+        "dir": AI_LLM_ROOT / "web_research_agent",
         "script": "agent_server.py",
     },
     "rag": {
         "name": "Internal RAG Agent",
         "port": 10012,
-        "dir": "internal_rag_agent",
+        "dir": AI_LLM_ROOT / "internal_rag_agent",
         "script": "agent_server.py",
     },
     "file": {
         "name": "File Management Agent",
         "port": 10013,
-        "dir": "file_management_agent",
+        "dir": AI_LLM_ROOT / "file_management_agent",
         "script": "agent_server.py",
     },
     "report": {
         "name": "Report Writing Agent",
         "port": 10014,
-        "dir": "report_writing_agent",
+        "dir": AI_LLM_ROOT / "report_writing_agent",
         "script": "agent_server.py",
     },
     "orchestrator": {
         "name": "Orchestrator Agent",
         "port": 10010,
-        "dir": "orchestrator_agent",
+        "dir": AI_LLM_ROOT / "orchestrator_agent",
         "script": "agent_server.py",
     },
 }
@@ -51,14 +52,16 @@ AGENTS = {
 
 def start_agent(key: str) -> subprocess.Popen:
     agent = AGENTS[key]
-    agent_dir = PROJECT_ROOT / agent["dir"]
+    agent_dir = agent["dir"]
     script_path = agent_dir / agent["script"]
 
     print(f"  Starting {agent['name']} on port {agent['port']}...")
 
+    env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
     return subprocess.Popen(
         [sys.executable, str(script_path)],
         cwd=str(agent_dir),
+        env=env,
         creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
     )
 
@@ -101,7 +104,7 @@ def main():
 
     print("\n" + "=" * 60)
     print(f"Started {len(processes)} agent(s)")
-    print("FastAPI Backend: python backend/main.py  (port 8000)")
+    print("FastAPI Backend: python -m backend.api.main  (port 8000)")
     print("Test Client:     python test_client.py")
     print("=" * 60)
 

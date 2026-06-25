@@ -110,10 +110,10 @@ from googleapiclient.http import MediaIoBaseDownload
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
-# 프로젝트 루트 기준 경로 (file_management_agent와 공유)
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CREDENTIALS_PATH = os.path.join(_PROJECT_ROOT, 'file_management_agent', 'credentials.json')
-_TOKEN_PATH = os.path.join(_PROJECT_ROOT, 'file_management_agent', 'token.json')
+# ai_llm 디렉토리 기준 경로 (file_management_agent와 credentials 공유)
+_AI_LLM_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_CREDENTIALS_PATH = os.path.join(_AI_LLM_ROOT, 'file_management_agent', 'credentials.json')
+_TOKEN_PATH = os.path.join(_AI_LLM_ROOT, 'file_management_agent', 'token.json')
 
 
 class _GDriveReadOnlyClient:
