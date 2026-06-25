@@ -15,6 +15,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 AI_LLM_ROOT = PROJECT_ROOT / "ai_llm"
+FRONTEND_ROOT = PROJECT_ROOT / "frontend"
 
 AGENTS = {
     "web": {
@@ -50,6 +51,27 @@ AGENTS = {
 }
 
 
+def start_backend() -> subprocess.Popen:
+    print("  Starting FastAPI Backend on port 8000...")
+    return subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "backend.api.main:app",
+         "--host", "0.0.0.0", "--port", "8000"],
+        cwd=str(PROJECT_ROOT),
+        env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)},
+        creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+    )
+
+
+def start_frontend() -> subprocess.Popen:
+    print("  Starting Frontend (Vite) on port 5173...")
+    npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
+    return subprocess.Popen(
+        [npm_cmd, "run", "dev"],
+        cwd=str(FRONTEND_ROOT),
+        creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+    )
+
+
 def start_agent(key: str) -> subprocess.Popen:
     agent = AGENTS[key]
     agent_dir = agent["dir"]
@@ -73,6 +95,11 @@ def main():
         choices=list(AGENTS.keys()) + ["all"],
         default="all",
         help="시작할 에이전트 (default: all)",
+    )
+    parser.add_argument(
+        "--no-frontend",
+        action="store_true",
+        help="프론트엔드 서버 시작 생략",
     )
     args = parser.parse_args()
 
@@ -102,10 +129,27 @@ def main():
         except Exception as e:
             print(f"  Failed to start Orchestrator: {e}")
 
+    try:
+        proc = start_backend()
+        processes.append(("backend", proc))
+    except Exception as e:
+        print(f"  Failed to start Backend: {e}")
+
+    if not args.no_frontend:
+        try:
+            proc = start_frontend()
+            processes.append(("frontend", proc))
+        except Exception as e:
+            print(f"  Failed to start Frontend: {e}")
+
+    pids_file = PROJECT_ROOT / "running_agents.pids"
+    pids_file.write_text("\n".join(str(p.pid) for _, p in processes))
+
     print("\n" + "=" * 60)
-    print(f"Started {len(processes)} agent(s)")
-    print("FastAPI Backend: python -m backend.api.main  (port 8000)")
-    print("Test Client:     python test_client.py")
+    print(f"Started {len(processes)} process(es)")
+    print("Frontend:        http://localhost:5173")
+    print("FastAPI Backend: http://localhost:8000")
+    print(f"PIDs saved to:   {pids_file.name}  (stop_agents.py로 일괄 종료)")
     print("=" * 60)
 
 

@@ -1,22 +1,26 @@
 """
-FastAPI 백엔드 게이트웨이
+FastAPI 백엔드 게이트웨이 (통합)
 
 A2A 오케스트레이터 에이전트와 REST API로 통신하는 통합 백엔드 서버입니다.
-프론트엔드 또는 외부 클라이언트에서 HTTP로 멀티 에이전트 시스템을 사용할 수 있습니다.
+채팅 히스토리(Supabase), 파일 업로드/인덱싱, 세션 관리 포함.
 
-실행:
-    cd backend
-    python main.py
-
-또는:
-    uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+실행 (프로젝트 루트에서):
+    python -m uvicorn backend.main:app --reload --port 8000
 """
 
 import os
+import sys
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
+
+# uvicorn --reload 가 subprocess를 spawn할 때 sys.path가 달라지는 문제 방지
+# 항상 project root를 sys.path 맨 앞에 보장
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 import httpx
 from dotenv import load_dotenv
@@ -133,6 +137,10 @@ async def lifespan(app: FastAPI):
     global _httpx_client
     if _httpx_client:
         await _httpx_client.aclose()
+    # 채팅 라우터 A2A 클라이언트 종료
+    from backend.api.routers.chat import _a2a_client as _chat_a2a
+    if _chat_a2a:
+        await _chat_a2a.close()
 
 
 app = FastAPI(
@@ -144,11 +152,22 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",  # Vue dev server
+        "http://localhost:3000",
+        "*",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── 확장 라우터 (세션, 파일, SSE 채팅) ────────────────
+from backend.api.routers import chat as _chat, sessions as _sessions, files as _files
+
+app.include_router(_chat.router, prefix="/api", tags=["chat"])
+app.include_router(_sessions.router, prefix="/api", tags=["sessions"])
+app.include_router(_files.router, prefix="/api", tags=["files"])
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -241,11 +260,18 @@ async def list_report_templates():
 @app.get("/")
 async def root():
     return {
-        "service": "Multi-Agent System API",
+        "service": "Morning Agent Hub API",
         "docs": "/docs",
-        "health": "/api/health",
-        "chat": "POST /api/chat",
-        "report_templates": "GET /api/report-templates",
+        "endpoints": {
+            "health": "GET /api/health",
+            "chat": "POST /api/chat",
+            "chat_stream": "GET /api/chat/stream",
+            "sessions": "GET /api/sessions",
+            "session_messages": "GET /api/sessions/{id}/messages",
+            "files_upload": "POST /api/files/upload",
+            "files_list": "GET /api/files",
+            "report_templates": "GET /api/report-templates",
+        },
     }
 
 
