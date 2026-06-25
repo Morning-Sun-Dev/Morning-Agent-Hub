@@ -211,3 +211,74 @@ async def test_stream_includes_trace_from_agents():
     assert len(final["trace"]) == 1
     assert final["trace"][0]["agent"] == "web_research"
     assert final["trace"][0]["duration_ms"] == 500
+
+
+@pytest.mark.asyncio
+async def test_call_agent_retries_on_transient_failure():
+    """_call_agent가 일시적 실패 시 재시도하여 성공하는지 확인"""
+    import agent as agent_module
+    from tenacity import retry, stop_after_attempt, wait_none, retry_if_exception_type
+
+    call_count = 0
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_none(),
+        retry=retry_if_exception_type(Exception),
+        reraise=True,
+    )
+    async def fast_send_with_retry(client, request):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise Exception("일시적 네트워크 오류")
+        mock_part = MagicMock()
+        mock_part.root.text = "성공 결과"
+        mock_artifact = MagicMock()
+        mock_artifact.parts = [mock_part]
+        mock_resp = MagicMock()
+        mock_resp.root.result.artifacts = [mock_artifact]
+        return mock_resp
+
+    from agent import OrchestratorAgent
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    mock_client = AsyncMock()
+    orch.remote_agents = {"web_research": mock_client}
+
+    with patch.object(agent_module, "_send_with_retry", new=fast_send_with_retry):
+        result = await orch._call_agent("web_research", "테스트", step_index=0)
+
+    assert call_count == 3
+    assert result.trace.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_call_agent_fails_after_max_retries():
+    """최대 재시도(3회) 초과 시 failed AgentResult 반환 확인"""
+    import agent as agent_module
+    from tenacity import retry, stop_after_attempt, wait_none, retry_if_exception_type
+
+    call_count = 0
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_none(),
+        retry=retry_if_exception_type(Exception),
+        reraise=True,
+    )
+    async def always_fail_with_retry(client, request):
+        nonlocal call_count
+        call_count += 1
+        raise Exception("지속적 오류")
+
+    from agent import OrchestratorAgent
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    mock_client = AsyncMock()
+    orch.remote_agents = {"web_research": mock_client}
+
+    with patch.object(agent_module, "_send_with_retry", new=always_fail_with_retry):
+        result = await orch._call_agent("web_research", "테스트", step_index=0)
+
+    assert result.success is False
+    assert result.trace.status == "failed"
+    assert call_count == 3  # 최대 3회 재시도 후 실패

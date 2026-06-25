@@ -11,6 +11,7 @@ from langchain_openai import ChatOpenAI
 from a2a.client import A2AClient, A2ACardResolver
 from a2a.types import MessageSendParams, SendMessageRequest, Part, TextPart, Message
 from uuid import uuid4
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from models import IntentPlan, PlanStep, TraceStep, AgentResult
 
@@ -45,8 +46,14 @@ SYSTEM_PROMPT = """당신은 사용자 요청을 분석하고 적절한 에이�
 """
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+    retry=retry_if_exception_type(Exception),
+    reraise=True,
+)
 async def _send_with_retry(client, request):
-    """A2A 메시지 전송 (Task 5에서 tenacity 재시도 추가 예정)"""
+    """A2A 메시지 전송 — 실패 시 최대 3회 재시도 (0.5s ~ 4s 지수 백오프)"""
     return await client.send_message(request)
 
 
