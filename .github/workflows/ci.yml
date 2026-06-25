@@ -79,7 +79,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          grep -v "pywin32" requirements.txt > requirements_ci.txt
+          pip install -r requirements_ci.txt
 
       - name: Run unit tests
         run: |
