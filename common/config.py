@@ -40,6 +40,12 @@ AGENT_CONFIGS: Dict[str, AgentConfig] = {
         port=10013,
         description="Google Drive 기반 파일 관리 에이전트"
     ),
+    "report_writing": AgentConfig(
+        name="Report Writing Agent",
+        url=os.getenv("REPORT_AGENT_URL", "http://localhost:10014"),
+        port=int(os.getenv("REPORT_AGENT_PORT", "10014")),
+        description="양식 기반 보고서 작성 에이전트"
+    ),
 }
 
 

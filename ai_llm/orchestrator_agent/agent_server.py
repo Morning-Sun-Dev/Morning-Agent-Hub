@@ -42,7 +42,9 @@ def create_agent_card() -> AgentCard:
         tags=['planning', 'multi-step', 'coordination'],
         examples=[
             '파일을 업로드하고 내용을 검색해서 요약해줘',
-            '외부 정보와 사내 문서를 비교 분석해줘'
+            '외부 정보와 사내 문서를 비교 분석해줘',
+            '웹 검색 후 조사 보고서로 작성해줘',
+            '조사 보고서 작성 후 Google Drive에 저장해줘',
         ],
     )
 

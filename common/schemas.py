@@ -59,6 +59,11 @@ class TaskIntent(str, Enum):
     DELETE_FILE = "delete_file"
     CREATE_VERSION = "create_version"
 
+    # Report Writing Agent
+    WRITE_REPORT = "write_report"
+    FORMAT_REPORT = "format_report"
+    LIST_REPORT_TEMPLATES = "list_report_templates"
+
 
 class ArtifactType(str, Enum):
     """아티팩트 유형 - 비즈니스 로직용"""
@@ -79,6 +84,10 @@ class ArtifactType(str, Enum):
     # 계획/실행
     PLAN = "plan"
     EXECUTION_RESULT = "execution_result"
+
+    # 보고서
+    REPORT_DOCUMENT = "report_document"
+    REPORT_METADATA = "report_metadata"
 
     # 오류
     ERROR = "error"

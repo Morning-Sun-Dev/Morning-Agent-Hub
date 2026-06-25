@@ -8,8 +8,8 @@ from pydantic import BaseModel
 # 프로젝트 루트 경로 추가
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "backend", "file_management_agent"))
-sys.path.insert(0, os.path.join(ROOT, "rag", "internal_rag_agent"))
+sys.path.insert(0, os.path.join(ROOT, "ai_llm", "file_management_agent"))
+sys.path.insert(0, os.path.join(ROOT, "ai_llm", "internal_rag_agent"))
 
 from gdrive_client import get_gdrive_client
 from indexing_service import index_document

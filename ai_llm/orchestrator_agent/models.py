@@ -1,7 +1,7 @@
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
-AgentName = Literal["internal_rag", "web_research", "file_management"]
+AgentName = Literal["internal_rag", "web_research", "file_management", "report_writing"]
 
 
 class PlanStep(BaseModel):
@@ -39,4 +39,5 @@ class AgentResult(BaseModel):
     agent: str
     success: bool
     content: Optional[str] = None
+    artifacts: List[Dict[str, Any]] = Field(default_factory=list)
     trace: TraceStep

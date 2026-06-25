@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import base64
 from typing import Dict, Any, AsyncIterator
 
 from dotenv import load_dotenv
@@ -44,7 +45,41 @@ def upload_file(content: str, filename: str, mime_type: str = "text/plain", fold
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
+@tool
+def upload_base64_file(base64_content: str, filename: str, mime_type: str, folder_id: str = "") -> str:
+    """
+    프론트엔드에서 전달받은 Base64 인코딩된 파일 데이터를 Google Drive에 업로드합니다.
+    이미지, PDF, 오디오, 엑셀 문서 등 모든 바이너리 파일 형식에 사용합니다.
 
+    Args:
+        base64_content: Base64로 인코딩된 파일 내용 (텍스트 문자열)
+        filename: 저장할 파일명 (예: photo.jpg, report.pdf)
+        mime_type: 파일의 MIME 타입 (예: image/jpeg, application/pdf)
+        folder_id: 저장할 폴더 ID (선택, 비워두면 기본 폴더에 저장)
+    """
+    try:
+        from datetime import datetime
+        
+        # 1. Base64 텍스트를 디코딩하여 원래의 바이너리 바이트(bytes) 데이터로 복원
+        file_bytes = base64.b64decode(base64_content)
+
+        # 2. 복원된 바이너리 데이터를 구글 드라이브 클라이언트에 전달
+        result = _client.upload_file(
+            content=file_bytes,
+            filename=filename,
+            mime_type=mime_type,
+            description=f"Uploaded via Agent at {datetime.now().isoformat()}",
+            parent_folder_id=folder_id if folder_id else None
+        )
+
+        return json.dumps({
+            "success": True,
+            "message": f"파일 '{filename}' 업로드 완료",
+            **result
+        }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+    
 @tool
 def download_file_as_base64(file_id: str) -> str: # [ 2 ]
     """
@@ -306,7 +341,7 @@ class FileManagementAgent:
             "data": file_list_data
         }
 
-
+"""
 if __name__ == "__main__":
     import asyncio
 
@@ -331,3 +366,62 @@ if __name__ == "__main__":
                 print(f"\n💬 {content}")
 
     asyncio.run(test())
+"""
+
+if __name__ == "__main__":
+    import asyncio
+    import base64
+    import mimetypes
+
+    async def test_tool_directly():
+        print("=" * 60)
+        print("LLM 없이 upload_base64_file 도구 직접 기능 테스트")
+        print("=" * 60)
+
+        # 구글 드라이브 클라이언트 초기화
+        _client.initialize()
+        
+        # 1. 테스트할 로컬 파일 경로 입력
+        # (테스트용으로 크기가 1~2MB 이하인 작은 이미지나 문서를 추천합니다)
+        file_path = input("테스트할 로컬 파일 경로를 입력하세요: ").strip()
+        
+        if not os.path.exists(file_path):
+            print(f"❌ 파일이 존재하지 않습니다: {file_path}")
+            return
+
+        filename = os.path.basename(file_path)
+        mime_type, _ = mimetypes.guess_type(file_path)
+        mime_type = mime_type or "application/octet-stream"
+
+        # 2. 로컬 파일 내용을 Base64 문자열로 인코딩
+        print("🔄 파일을 Base64로 인코딩 중...")
+        with open(file_path, "rb") as f:
+            encoded_string = base64.b64encode(f.read()).decode('utf-8')
+
+        print(f"📦 인코딩 완료 (문자열 길이: {len(encoded_string)} 자)")
+        print("-" * 60)
+        print("🚀 구글 드라이브 업로드 툴 직접 호출 시작...")
+
+        # 3. 에이전트(LLM)를 거치지 않고, 데코레이터가 적용된 원래 파이썬 함수(.func) 직접 호출
+        # 이렇게 하면 토큰 제한(Context Length) 문제 없이 대용량 파일도 테스트 가능합니다.
+        try:
+            # LangChain 툴 객체 내부의 실제 함수는 .func로 접근할 수 있습니다.
+            result_json = upload_base64_file.func(
+                base64_content=encoded_string,
+                filename=filename,
+                mime_type=mime_type,
+                folder_id=""  # 특정 폴더 지정을 원하면 폴더 ID 입력
+            )
+            
+            result = json.loads(result_json)
+            if result.get("success"):
+                print("\n✅ 업로드 성공!")
+                print(f"💬 결과 메시지: {result.get('message')}")
+                print(f"🆔 파일 ID: {result.get('file_id')}")
+            else:
+                print(f"\n❌ 업로드 실패: {result.get('error')}")
+                
+        except Exception as e:
+            print(f"\n❌ 예외 발생: {str(e)}")
+
+    asyncio.run(test_tool_directly())
