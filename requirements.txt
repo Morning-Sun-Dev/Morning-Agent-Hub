@@ -160,7 +160,7 @@ python-iso639==2025.2.18
 python-magic==0.4.27
 python-multipart==0.0.20
 python-oxmsg==0.0.2
-pywin32==311
+pywin32==311; sys_platform == "win32"
 PyYAML==6.0.2
 pyzmq==27.0.1
 RapidFuzz==3.14.1
