@@ -149,3 +149,65 @@ async def test_call_agent_not_found():
 
     assert result.success is False
     assert result.trace.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_stream_yields_trace_in_final_response():
+    """stream 최종 응답에 trace 목록이 포함되는지 확인"""
+    mock_plan = IntentPlan(intent="DIRECT", direct_answer="안녕하세요!")
+
+    from agent import OrchestratorAgent
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    orch.initialized = True
+    orch.llm = MagicMock()
+    mock_structured = MagicMock()
+    orch.llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = mock_plan
+
+    chunks = []
+    async for chunk in orch.stream("안녕"):
+        chunks.append(chunk)
+
+    final = chunks[-1]
+    assert final["is_task_complete"] is True
+    assert "trace" in final
+    assert isinstance(final["trace"], list)
+    assert len(final["trace"]) == 1
+    assert final["trace"][0]["agent"] == "orchestrator"
+    assert final["trace"][0]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_stream_includes_trace_from_agents():
+    """에이전트 실행 후 trace에 각 에이전트 단계가 포함되는지 확인"""
+    mock_plan = IntentPlan(
+        intent="WEB_SEARCH",
+        plan=[PlanStep(agent="web_research", query="AI 트렌드")],
+    )
+    mock_agent_result = AgentResult(
+        agent="web_research",
+        success=True,
+        content="AI 트렌드 결과",
+        trace=TraceStep(step=0, agent="web_research", status="completed", message="완료", duration_ms=500),
+    )
+
+    from agent import OrchestratorAgent
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    orch.initialized = True
+    orch.llm = MagicMock()
+    mock_structured = MagicMock()
+    orch.llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = mock_plan
+
+    with patch.object(orch, "execute_plan", return_value=[mock_agent_result]):
+        with patch.object(orch, "generate_final_response", return_value="최종 답변"):
+            chunks = []
+            async for chunk in orch.stream("AI 트렌드 알려줘"):
+                chunks.append(chunk)
+
+    final = chunks[-1]
+    assert final["is_task_complete"] is True
+    assert final["content"] == "최종 답변"
+    assert len(final["trace"]) == 1
+    assert final["trace"][0]["agent"] == "web_research"
+    assert final["trace"][0]["duration_ms"] == 500

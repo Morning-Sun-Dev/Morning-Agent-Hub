@@ -1,3 +1,4 @@
+import json
 import logging
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -75,11 +76,17 @@ class OrchestratorAgentExecutor(AgentExecutor):
                     )
                     break
                 elif is_complete: # [ 2 ]
-                    # 답변을 artifact로 추가
+                    trace = item.get("trace", [])
                     await updater.add_artifact(
                         parts=[Part(root=TextPart(text=content))],
-                        name='orchestrator_result'
+                        name="orchestrator_result",
                     )
+                    if trace:
+                        trace_json = json.dumps(trace, ensure_ascii=False)
+                        await updater.add_artifact(
+                            parts=[Part(root=TextPart(text=trace_json))],
+                            name="execution_trace",
+                        )
                     await updater.complete()
                     break
 

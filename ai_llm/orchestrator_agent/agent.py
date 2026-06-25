@@ -166,6 +166,24 @@ class OrchestratorAgent:
 
         return [r for r in results if r is not None]
 
+    async def generate_final_response(self, query: str, results: List[AgentResult]) -> str:
+        """에이전트 결과를 통합해 최종 답변 생성"""
+        results_text = json.dumps(
+            [{"agent": r.agent, "success": r.success, "content": r.content} for r in results],
+            ensure_ascii=False,
+            indent=2,
+        )
+        final_llm = ChatOpenAI(model="gpt-4o")
+        messages = [
+            {"role": "system", "content": "여러 에이전트의 결과를 통합하여 사용자에게 명확한 답변을 제공하세요."},
+            {
+                "role": "user",
+                "content": f"원본 질문: {query}\n\n에이전트 결과:\n{results_text}\n\n위 정보를 바탕으로 답변해주세요.",
+            },
+        ]
+        response = await final_llm.ainvoke(messages)
+        return response.content
+
     async def analyze_intent(self, query: str) -> IntentPlan:
         """Pydantic structured output으로 Intent 분류"""
         structured_llm = self.llm.with_structured_output(IntentPlan)
@@ -176,21 +194,40 @@ class OrchestratorAgent:
         return structured_llm.invoke(messages)
 
     async def stream(self, query: str, session_id: str = "default") -> AsyncIterator[Dict[str, Any]]:
-        """스트리밍 처리 (Task 3~5에서 순차 확장 예정)"""
+        """스트리밍 처리 — TraceStep 포함 (F-017)"""
         if not self.initialized:
             await self.initialize()
 
-        yield {"is_task_complete": False, "require_user_input": False, "content": "🤔 질문을 분석하고 있습니다...", "trace": []}
+        trace: List[Dict] = []
+
+        yield {"is_task_complete": False, "require_user_input": False, "content": "🤔 질문을 분석하고 있습니다...", "trace": trace}
 
         try:
             plan = await self.analyze_intent(query)
             logger.info(f"[ORCHESTRATOR] Intent: {plan.intent}, Plan steps: {len(plan.plan)}")
         except Exception as e:
-            yield {"is_task_complete": True, "require_user_input": False, "content": f"분석 중 오류: {str(e)}", "trace": []}
+            logger.error(f"[ORCHESTRATOR] Intent 분석 실패: {e}")
+            yield {"is_task_complete": True, "require_user_input": False, "content": f"분석 중 오류가 발생했습니다: {str(e)}", "trace": trace}
             return
 
         if plan.intent == "DIRECT" and plan.direct_answer:
-            yield {"is_task_complete": True, "require_user_input": False, "content": plan.direct_answer, "trace": []}
+            trace.append(TraceStep(step=0, agent="orchestrator", status="completed", message="직접 답변").model_dump())
+            yield {"is_task_complete": True, "require_user_input": False, "content": plan.direct_answer, "trace": trace}
             return
 
-        yield {"is_task_complete": True, "require_user_input": False, "content": f"[Plan] intent={plan.intent}, steps={len(plan.plan)}", "trace": []}
+        if not plan.plan:
+            yield {"is_task_complete": True, "require_user_input": False, "content": "처리할 작업이 없습니다.", "trace": trace}
+            return
+
+        yield {"is_task_complete": False, "require_user_input": False, "content": f"📋 {len(plan.plan)}개 에이전트에 요청 중...", "trace": trace}
+
+        results = await self.execute_plan(plan)
+
+        for r in results:
+            trace.append(r.trace.model_dump())
+
+        yield {"is_task_complete": False, "require_user_input": False, "content": "📝 결과를 정리하고 있습니다...", "trace": trace}
+
+        final_response = await self.generate_final_response(query, results)
+
+        yield {"is_task_complete": True, "require_user_input": False, "content": final_response, "trace": trace}
