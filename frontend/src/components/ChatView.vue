@@ -3,37 +3,28 @@
     <!-- 메시지 목록 -->
     <div class="messages" ref="messagesEl">
       <div v-if="messages.length === 0" class="empty">
-        질문을 입력하면 AI가 사내 문서를 검색해서 답변합니다.
+        질문을 입력하거나 파일을 업로드하세요.
       </div>
-      <div
-        v-for="(msg, i) in messages"
-        :key="i"
-        class="msg"
-        :class="msg.role"
-      >
+      <div v-for="(msg, i) in messages" :key="i" class="msg" :class="msg.role">
         <div class="bubble">
           <span class="text" v-html="formatText(msg.content)"></span>
-          <span v-if="msg.status" class="status-badge">{{ statusLabel(msg.status) }}</span>
         </div>
       </div>
-      <!-- 스트리밍 중 표시 -->
       <div v-if="streaming" class="msg assistant">
-        <div class="bubble streaming">
+        <div class="bubble">
           <span class="text" v-html="formatText(streamBuffer)"></span>
           <span class="cursor">▍</span>
         </div>
       </div>
     </div>
 
-    <!-- 파일 업로드 -->
+    <!-- 입력 영역 -->
     <div class="input-area">
       <FileUpload @uploaded="onFileUploaded" />
-
-      <!-- 입력창 -->
       <div class="input-row">
         <textarea
           v-model="input"
-          placeholder="메시지를 입력하세요 (Shift+Enter로 줄바꿈)"
+          placeholder="메시지를 입력하세요 (Enter로 전송, Shift+Enter로 줄바꿈)"
           rows="1"
           @keydown.enter.exact.prevent="send"
           @input="autoResize"
@@ -49,27 +40,34 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { streamChat } from '../api'
 import FileUpload from './FileUpload.vue'
+
+const props = defineProps({
+  sessionId: { type: String, default: null },
+  initialMessages: { type: Array, default: () => [] },
+})
+
+const emit = defineEmits(['session-created'])
 
 const messages = ref([])
 const input = ref('')
 const streaming = ref(false)
 const streamBuffer = ref('')
-const sessionId = ref(null)
+const currentSessionId = ref(props.sessionId)
 const messagesEl = ref(null)
 const textareaEl = ref(null)
 
-const STATUS_LABELS = {
-  working: '🔍 검색 중',
-  completed: '완료',
-  failed: '실패',
-}
+// 세션 변경 시 메시지 초기화
+watch(() => props.sessionId, (newId) => {
+  currentSessionId.value = newId
+})
 
-function statusLabel(s) {
-  return STATUS_LABELS[s] || s
-}
+watch(() => props.initialMessages, (msgs) => {
+  messages.value = msgs.map(m => ({ role: m.role, content: m.content }))
+  nextTick(scrollBottom)
+}, { immediate: true })
 
 function formatText(text) {
   if (!text) return ''
@@ -82,9 +80,7 @@ function formatText(text) {
 
 async function scrollBottom() {
   await nextTick()
-  if (messagesEl.value) {
-    messagesEl.value.scrollTop = messagesEl.value.scrollHeight
-  }
+  if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
 }
 
 function autoResize() {
@@ -100,28 +96,23 @@ async function send() {
 
   messages.value.push({ role: 'user', content: text })
   input.value = ''
-  textareaEl.value.style.height = 'auto'
+  if (textareaEl.value) textareaEl.value.style.height = 'auto'
   streamBuffer.value = ''
   streaming.value = true
   await scrollBottom()
 
-  let currentStatus = null
-
-  const cancel = streamChat(text, sessionId.value, {
-    onStatus(state) {
-      currentStatus = state
-    },
+  streamChat(text, currentSessionId.value, {
+    onStatus() {},
     onAnswer(content, sid) {
-      if (sid) sessionId.value = sid
+      if (sid && !currentSessionId.value) {
+        currentSessionId.value = sid
+        emit('session-created', sid)
+      }
       streamBuffer.value += content
       scrollBottom()
     },
     onDone() {
-      messages.value.push({
-        role: 'assistant',
-        content: streamBuffer.value,
-        status: currentStatus,
-      })
+      messages.value.push({ role: 'assistant', content: streamBuffer.value })
       streamBuffer.value = ''
       streaming.value = false
       scrollBottom()
@@ -130,7 +121,6 @@ async function send() {
       messages.value.push({ role: 'assistant', content: `오류: ${err}` })
       streamBuffer.value = ''
       streaming.value = false
-      scrollBottom()
     },
   })
 }
@@ -138,7 +128,7 @@ async function send() {
 function onFileUploaded(data) {
   messages.value.push({
     role: 'assistant',
-    content: `📄 **${data.filename}** 파일이 업로드되어 인덱싱됐습니다. 이제 이 파일에 대해 질문할 수 있어요.`,
+    content: `📄 ${data.filename} 파일이 인덱싱됐습니다. 이제 이 파일에 대해 질문할 수 있어요.`,
   })
   scrollBottom()
 }
@@ -154,7 +144,7 @@ function onFileUploaded(data) {
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 16px;
+  padding: 24px 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -164,28 +154,19 @@ function onFileUploaded(data) {
   text-align: center;
   color: #9ca3af;
   font-size: 14px;
-  margin-top: 60px;
+  margin-top: 80px;
 }
 
-.msg {
-  display: flex;
-}
-
-.msg.user {
-  justify-content: flex-end;
-}
-
-.msg.assistant {
-  justify-content: flex-start;
-}
+.msg { display: flex; }
+.msg.user { justify-content: flex-end; }
+.msg.assistant { justify-content: flex-start; }
 
 .bubble {
-  max-width: 70%;
+  max-width: 72%;
   padding: 12px 16px;
   border-radius: 16px;
   font-size: 14px;
   line-height: 1.6;
-  position: relative;
 }
 
 .msg.user .bubble {
@@ -200,29 +181,14 @@ function onFileUploaded(data) {
   border-bottom-left-radius: 4px;
 }
 
-.bubble.streaming {
-  background: #f3f4f6;
-}
-
 .cursor {
   display: inline-block;
   animation: blink 0.8s step-start infinite;
   color: #6366f1;
-  margin-left: 2px;
 }
 
-@keyframes blink {
-  50% { opacity: 0; }
-}
+@keyframes blink { 50% { opacity: 0; } }
 
-.status-badge {
-  display: block;
-  font-size: 11px;
-  color: #9ca3af;
-  margin-top: 4px;
-}
-
-/* 입력 영역 */
 .input-area {
   border-top: 1px solid #e5e7eb;
   padding: 12px 16px;
@@ -248,14 +214,8 @@ textarea {
   overflow-y: hidden;
 }
 
-textarea:focus {
-  border-color: #6366f1;
-}
-
-textarea:disabled {
-  background: #f9fafb;
-  color: #9ca3af;
-}
+textarea:focus { border-color: #6366f1; }
+textarea:disabled { background: #f9fafb; color: #9ca3af; }
 
 button {
   padding: 10px 20px;
@@ -269,12 +229,6 @@ button {
   transition: background 0.2s;
 }
 
-button:hover:not(:disabled) {
-  background: #4f46e5;
-}
-
-button:disabled {
-  background: #c7d2fe;
-  cursor: not-allowed;
-}
+button:hover:not(:disabled) { background: #4f46e5; }
+button:disabled { background: #c7d2fe; cursor: not-allowed; }
 </style>
