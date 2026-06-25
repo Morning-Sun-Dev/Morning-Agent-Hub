@@ -1,14 +1,16 @@
-# ai_llm/orchestrator_agent/models.py
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
+
+AgentName = Literal["internal_rag", "web_research", "file_management"]
 
 
 class PlanStep(BaseModel):
     """단일 에이전트 실행 단계"""
-    agent: Literal["internal_rag", "web_research", "file_management"]
+    agent: AgentName
     query: str = Field(description="에이전트에 전달할 자연어 요청")
     depends_on: Optional[int] = Field(
         default=None,
+        ge=0,
         description="의존하는 이전 step 인덱스 (0부터 시작). None이면 독립 실행 가능"
     )
 
@@ -25,7 +27,7 @@ class IntentPlan(BaseModel):
 
 class TraceStep(BaseModel):
     """에이전트 실행 과정 단계 (F-017)"""
-    step: int
+    step: int = Field(ge=0)
     agent: str
     status: Literal["started", "completed", "failed", "skipped"]
     message: str
@@ -36,5 +38,5 @@ class AgentResult(BaseModel):
     """단일 에이전트 실행 결과"""
     agent: str
     success: bool
-    content: str
+    content: Optional[str] = None
     trace: TraceStep
