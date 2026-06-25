@@ -3,7 +3,7 @@
     <label class="upload-area" :class="{ dragging }" @dragover.prevent="dragging = true"
       @dragleave="dragging = false" @drop.prevent="onDrop">
       <input type="file" accept=".pdf,.txt,.md" @change="onSelect" hidden ref="inputRef" />
-      <span v-if="!uploading" @click="inputRef.click()">
+      <span v-if="!uploading" >
         📄 PDF, TXT, MD 파일을 드래그하거나 클릭해서 업로드
       </span>
       <span v-else>업로드 중...</span>
