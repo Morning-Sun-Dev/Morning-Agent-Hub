@@ -1,7 +1,15 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createMessage, createProgress } from '../../models/chatModels'
-import { getCapabilities, getReportTemplates, streamChat, uploadFile } from '../../api'
+import {
+  getCapabilities,
+  getFileDownloadAction,
+  getFileInfo,
+  getReportTemplates,
+  listFiles,
+  streamChat,
+  uploadFile,
+} from '../../api'
 import ChatHeader from './ChatHeader.vue'
 import EvidencePanel from './EvidencePanel.vue'
 import MessageComposer from './MessageComposer.vue'
@@ -16,9 +24,11 @@ const runState = ref('idle')
 const progress = ref([])
 const sources = ref([])
 const generatedFiles = ref([])
+const driveFiles = ref([])
 const capabilities = ref([])
 const reportTemplates = ref([])
 const selectedTemplateId = ref('')
+const fileNotice = ref('')
 const error = ref(null)
 const sessionId = ref(null)
 const lastRequest = ref(null)
@@ -40,6 +50,12 @@ const selectedReportTemplate = computed(() =>
   reportTemplates.value.find((template) => template.id === selectedTemplateId.value) || null,
 )
 
+const panelFiles = computed(() => {
+  if (generatedFiles.value.length) return generatedFiles.value
+  if (attachments.value.length) return attachments.value
+  return driveFiles.value
+})
+
 function applyPrompt(prompt) {
   draft.value = prompt
 }
@@ -53,6 +69,7 @@ function startNewChat() {
   sources.value = []
   generatedFiles.value = []
   progress.value = []
+  fileNotice.value = ''
   error.value = null
   runState.value = 'idle'
   sessionId.value = null
@@ -231,13 +248,49 @@ function isBusy() {
   return runState.value === 'running' || runState.value === 'uploading'
 }
 
+function updateDriveFile(fileId, updates) {
+  driveFiles.value = driveFiles.value.map((file) => {
+    const actionId = file.fileId || file.storageRef || file.id
+    if (actionId !== fileId) return file
+    return { ...file, ...updates }
+  })
+}
+
+async function inspectFile(fileId) {
+  try {
+    const file = await getFileInfo(fileId)
+    updateDriveFile(fileId, file)
+    fileNotice.value = `${file.name || '파일'} 상세 정보를 확인했습니다.`
+    activePanel.value = 'files'
+  } catch (err) {
+    fileNotice.value = err.message || '파일 상세 정보를 확인하지 못했습니다.'
+  }
+}
+
+async function prepareFileDownload(fileId) {
+  try {
+    const action = await getFileDownloadAction(fileId)
+    if (!action.available) {
+      fileNotice.value = '다운로드 링크가 아직 준비되지 않았습니다.'
+      return
+    }
+    updateDriveFile(fileId, { downloadUrl: action.url, openUrl: action.fallbackOpenUrl })
+    fileNotice.value = '다운로드 링크가 준비됐습니다.'
+    activePanel.value = 'files'
+  } catch (err) {
+    fileNotice.value = err.message || '다운로드 링크를 준비하지 못했습니다.'
+  }
+}
+
 onMounted(async () => {
-  const [capabilityResult, templateResult] = await Promise.allSettled([
+  const [capabilityResult, templateResult, fileResult] = await Promise.allSettled([
     getCapabilities(),
     getReportTemplates(),
+    listFiles(),
   ])
   capabilities.value = capabilityResult.status === 'fulfilled' ? capabilityResult.value : []
   reportTemplates.value = templateResult.status === 'fulfilled' ? templateResult.value : []
+  driveFiles.value = fileResult.status === 'fulfilled' ? fileResult.value : []
 })
 
 onBeforeUnmount(() => {
@@ -276,9 +329,12 @@ onBeforeUnmount(() => {
           class="mobile-evidence"
           mobile-collapsed
           :sources="sources"
-          :files="generatedFiles.length ? generatedFiles : attachments"
+          :files="panelFiles"
           :progress="progress"
           :capabilities="capabilities"
+          :file-notice="fileNotice"
+          @inspect-file="inspectFile"
+          @prepare-download="prepareFileDownload"
         />
 
         <div class="composer-wrap">
@@ -302,9 +358,12 @@ onBeforeUnmount(() => {
         v-model:active-tab="activePanel"
         class="desktop-evidence"
         :sources="sources"
-        :files="generatedFiles.length ? generatedFiles : attachments"
+        :files="panelFiles"
         :progress="progress"
         :capabilities="capabilities"
+        :file-notice="fileNotice"
+        @inspect-file="inspectFile"
+        @prepare-download="prepareFileDownload"
       />
 
     </main>

@@ -1,11 +1,22 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getCapabilities, getReportTemplates, streamChat, uploadFile } from '../../../api'
+import {
+  getCapabilities,
+  getFileDownloadAction,
+  getFileInfo,
+  getReportTemplates,
+  listFiles,
+  streamChat,
+  uploadFile,
+} from '../../../api'
 import ChatShell from '../ChatShell.vue'
 
 vi.mock('../../../api', () => ({
   getCapabilities: vi.fn(),
+  getFileDownloadAction: vi.fn(),
+  getFileInfo: vi.fn(),
   getReportTemplates: vi.fn(),
+  listFiles: vi.fn(),
   uploadFile: vi.fn(),
   streamChat: vi.fn(),
 }))
@@ -41,6 +52,27 @@ describe('ChatShell', () => {
         sectionCount: 5,
       },
     ])
+    listFiles.mockResolvedValue([
+      {
+        id: 'gdrive://file/a',
+        fileId: 'drive-file-1',
+        name: 'brief.md',
+        status: 'ready',
+        downloadUrl: 'https://drive.example/download/a',
+      },
+    ])
+    getFileInfo.mockResolvedValue({
+      id: 'gdrive://file/a',
+      fileId: 'drive-file-1',
+      name: 'brief.md',
+      detail: 'text/markdown',
+    })
+    getFileDownloadAction.mockResolvedValue({
+      available: true,
+      method: 'open_url',
+      url: 'https://drive.example/download/a',
+      fallbackOpenUrl: null,
+    })
     streamChat.mockImplementation((_message, _sessionId, handlers) => {
       handlers.onProgress({ stage: 'orchestrator', message: '작업 중', state: 'working' })
       handlers.onAnswer({ sessionId: 's1', content: '응답입니다.', sources: [], files: [], progress: [] })
@@ -185,5 +217,22 @@ describe('ChatShell', () => {
       'format_report',
       'list_templates',
     ]))
+  })
+
+  it('loads drive files and handles file management actions', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '파일').trigger('click')
+    expect(listFiles).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('brief.md')
+
+    await wrapper.get('[data-testid="file-info-button"]').trigger('click')
+    expect(getFileInfo).toHaveBeenCalledWith('drive-file-1')
+    expect(wrapper.text()).toContain('brief.md 상세 정보를 확인했습니다.')
+
+    await wrapper.get('[data-testid="file-download-button"]').trigger('click')
+    expect(getFileDownloadAction).toHaveBeenCalledWith('drive-file-1')
+    expect(wrapper.text()).toContain('다운로드 링크가 준비됐습니다.')
   })
 })
