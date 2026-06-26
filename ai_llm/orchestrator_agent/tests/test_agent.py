@@ -139,6 +139,66 @@ async def test_execute_plan_sequential_dependent_steps():
 
 
 @pytest.mark.asyncio
+async def test_execute_plan_report_writing_waits_for_upstream():
+    """report_writing depends_on=null 이라도 normalize 후 upstream이 채워진 뒤 실행"""
+    call_order = []
+    report_queries = []
+
+    async def fake_call(agent_name, query, step_index=0):
+        call_order.append((step_index, agent_name))
+        if agent_name == "report_writing":
+            report_queries.append(query)
+        if agent_name == "web_research":
+            body = "SQL은 관계형 DB 질의 언어입니다."
+            artifacts = [{"name": "web_search_result", "text": body}]
+        elif agent_name == "file_management" and step_index == 0:
+            body = "test.txt 확인"
+            artifacts = [{"name": "file_content", "data": {"filename": "test.txt", "content": "# 개요"}}]
+        else:
+            body = f"{agent_name} ok"
+            artifacts = []
+        return AgentResult(
+            agent=agent_name,
+            success=True,
+            content=body,
+            artifacts=artifacts,
+            trace=TraceStep(step=step_index, agent=agent_name, status="completed", message="완료"),
+        )
+
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+    from shared.report_context import parse_report_context
+    from agent import OrchestratorAgent
+
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    orch.remote_agents = {
+        "file_management": AsyncMock(),
+        "web_research": AsyncMock(),
+        "report_writing": AsyncMock(),
+    }
+
+    plan = IntentPlan(
+        intent="HYBRID",
+        plan=[
+            PlanStep(agent="file_management", query="test.txt 양식 조회", depends_on=None),
+            PlanStep(agent="web_research", query="SQL 조사", depends_on=None),
+            PlanStep(agent="report_writing", query="보고서 주제: SQL", depends_on=None),
+        ],
+    )
+
+    with patch.object(orch, "_call_agent", side_effect=fake_call):
+        await orch.execute_plan(plan, user_query="test.txt 양식 참고 SQL 보고서")
+
+    assert call_order.index((2, "report_writing")) > call_order.index((0, "file_management"))
+    assert call_order.index((2, "report_writing")) > call_order.index((1, "web_research"))
+
+    ctx = parse_report_context(report_queries[0])
+    assert ctx is not None
+    assert len(ctx.sources) >= 2
+    assert ctx.report_topic == "SQL"
+
+
+@pytest.mark.asyncio
 async def test_call_agent_not_found():
     """존재하지 않는 에이전트 호출 시 failed AgentResult 반환"""
     from agent import OrchestratorAgent

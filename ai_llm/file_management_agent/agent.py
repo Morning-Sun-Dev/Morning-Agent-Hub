@@ -2,7 +2,8 @@ import os
 import json
 import logging
 import base64
-from typing import Dict, Any, AsyncIterator
+import re
+from typing import Dict, Any, AsyncIterator, Optional
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
@@ -101,6 +102,48 @@ def download_file_as_base64(file_id: str) -> str: # [ 2 ]
             "success": True,
             **result
         }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
+@tool
+def find_and_read_file_by_name(filename: str, max_chars: int = 15000) -> str:
+    """
+    파일명으로 Google Drive 전체를 검색한 뒤 텍스트 파일 내용을 읽습니다.
+    보고서 양식 참고(test.txt 등) 요청에 **반드시** 이 도구를 사용하세요.
+
+    Args:
+        filename: 파일명 (예: test.txt)
+        max_chars: 최대 읽을 문자 수 (기본 15000)
+    """
+    try:
+        result = _client.find_and_read_by_name(filename, max_chars=max_chars)
+        if result is None:
+            return json.dumps({
+                "success": False,
+                "error": f"'{filename}' 파일을 Drive에서 찾을 수 없습니다",
+            }, ensure_ascii=False)
+
+        return json.dumps({"success": True, **result}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
+@tool
+def read_file_content(file_id: str, max_chars: int = 15000) -> str:
+    """
+    Google Drive 텍스트 파일의 내용을 읽습니다. 보고서 양식·형식 참고용으로 사용합니다.
+
+    Args:
+        file_id: 파일 ID 또는 storage_ref (예: gdrive://file/abc123)
+        max_chars: 최대 읽을 문자 수 (기본 5000)
+    """
+    try:
+        result = _client.read_file_content(file_id, max_chars=max_chars)
+        if result is None:
+            return json.dumps({"success": False, "error": "파일을 찾을 수 없습니다"}, ensure_ascii=False)
+
+        return json.dumps({"success": True, **result}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
@@ -277,7 +320,10 @@ def create_folder(folder_name: str, parent_folder_id: str = "") -> str: # [ 2 ]
 
 tools = [
     upload_file,
+    upload_base64_file,
     download_file_as_base64,
+    find_and_read_file_by_name,
+    read_file_content,
     get_file_info,
     list_files,
     find_folder_by_name,
@@ -285,6 +331,108 @@ tools = [
     update_file,
     create_folder
 ]
+
+
+FILE_AGENT_SYSTEM_PROMPT = """당신은 Google Drive 파일 관리 에이전트입니다.
+
+**양식/참고 파일 읽기 요청** (test.txt, .md 등):
+1. 반드시 `find_and_read_file_by_name` 도구를 호출하세요 (파일명 그대로).
+2. 파일 내용을 읽은 뒤 "파일을 읽었습니다"라고만 답하지 말고, 읽기 성공 여부를 보고하세요.
+3. "내용을 직접 참조할 수 없습니다"라고 **절대** 답하지 마세요 — 도구로 읽을 수 있습니다.
+
+**저장/업로드 요청**: upload_file 등 적절한 도구 사용.
+"""
+
+_FILENAME_PATTERN = re.compile(r"([\w\uac00-\ud7a3.-]+\.(?:txt|md|markdown))", re.IGNORECASE)
+_FORMAT_READ_PATTERNS = (
+    "양식 참고",
+    "양식대로",
+    "양식 참조",
+    "참고용",
+    "참고해서",
+    "내용을 조회",
+    "내용 조회",
+    "파일을 찾아",
+    "format",
+    "template",
+)
+_SAVE_PATTERNS = (
+    "저장해",
+    "저장하",
+    "업로드",
+    "upload",
+    "save",
+    "저장할 파일명",
+    "아래 보고서 내용",
+)
+
+
+def _extract_filename_from_query(query: str) -> Optional[str]:
+    m = _FILENAME_PATTERN.search(query)
+    return m.group(1) if m else None
+
+
+def _is_format_read_request(query: str) -> bool:
+    q = query.lower()
+    if not _extract_filename_from_query(query):
+        return False
+    if any(p in q for p in _SAVE_PATTERNS):
+        return False
+    return any(p in q for p in _FORMAT_READ_PATTERNS)
+
+
+def _direct_read_format_file(filename: str) -> Optional[dict]:
+    """LLM 없이 Drive에서 양식 파일 직접 읽기"""
+    try:
+        _client.initialize()
+        result = _client.find_and_read_by_name(filename, max_chars=15000)
+        if result and result.get("content"):
+            return {
+                "filename": result.get("filename", filename),
+                "content": result.get("content", ""),
+                "mime_type": result.get("mime_type", ""),
+                "truncated": result.get("truncated", False),
+                "file_id": result.get("file_id", ""),
+                "storage_ref": result.get("storage_ref", ""),
+            }
+        logger.warning(f"[FILE AGENT] Drive에서 '{filename}' 읽기 실패 (검색/다운로드)")
+    except Exception as e:
+        logger.warning(f"[FILE AGENT] 직접 파일 읽기 예외 ({filename}): {e}")
+    return None
+
+
+def _is_tool_result_message(msg) -> bool:
+    msg_type = getattr(msg, "type", None)
+    if msg_type == "tool":
+        return True
+    class_name = type(msg).__name__
+    if class_name == "ToolMessage":
+        return True
+    name = getattr(msg, "name", None)
+    if name and not getattr(msg, "tool_calls", None):
+        if class_name not in ("AIMessage", "HumanMessage", "SystemMessage"):
+            return True
+    return False
+
+
+def _extract_file_content_from_tools(tool_messages) -> Optional[dict]:
+    """read_file_content 도구 결과에서 파일 원문 추출"""
+    for msg in reversed(tool_messages):
+        if not hasattr(msg, "content") or not msg.content:
+            continue
+        try:
+            raw = msg.content
+            data = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(data, dict) and data.get("success") and data.get("content"):
+                return {
+                    "filename": data.get("filename", ""),
+                    "content": data.get("content", ""),
+                    "mime_type": data.get("mime_type", ""),
+                    "truncated": data.get("truncated", False),
+                }
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return None
 
 
 class FileManagementAgent:
@@ -303,19 +451,48 @@ class FileManagementAgent:
         self.initialized = True
         logger.info("[FILE AGENT] [INIT] File Management Agent 초기화 완료")
 
-    async def stream(self, query: str) -> AsyncIterator[Dict[str, Any]]: # [ 2 ]
+    async def stream(self, query: str) -> AsyncIterator[Dict[str, Any]]:
         if not self.initialized:
             await self.initialize()
 
-        final_message = None
-        file_list_data = None  # 파일 목록 데이터
+        filename = _extract_filename_from_query(query)
+        if _is_format_read_request(query) and filename:
+            file_content_data = _direct_read_format_file(filename)
+            if file_content_data:
+                logger.info(
+                    f"[FILE AGENT] 양식 파일 직접 읽기 성공: {filename} "
+                    f"({len(file_content_data.get('content', ''))} chars)"
+                )
+                yield {
+                    "is_task_complete": True,
+                    "require_user_input": False,
+                    "content": (
+                        f"'{filename}' 파일을 Drive에서 읽었습니다 "
+                        f"({len(file_content_data['content'])}자). "
+                        "보고서 양식 참고용으로 전달합니다."
+                    ),
+                    "data": file_content_data,
+                    "file_content": file_content_data,
+                }
+                return
+            logger.warning(f"[FILE AGENT] 양식 파일 직접 읽기 실패, LLM fallback: {filename}")
 
-        for chunk in self.graph.stream({"messages": [("user", query)]}):
+        final_message = None
+        file_list_data = None
+        file_content_data = None
+        tool_messages = []
+
+        for chunk in self.graph.stream({
+            "messages": [
+                ("system", FILE_AGENT_SYSTEM_PROMPT),
+                ("user", query),
+            ]
+        }):
             for node_name, node_output in chunk.items():
                 messages = node_output.get("messages", [])
 
                 for msg in messages:
-                    if hasattr(msg, 'tool_calls') and msg.tool_calls: # [ 3 ]
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
                         tool_names = [tc.get('name', 'unknown') for tc in msg.tool_calls]
                         yield {
                             "is_task_complete": False,
@@ -323,9 +500,13 @@ class FileManagementAgent:
                             "content": f"🔧 도구 실행 중... ({', '.join(tool_names)})"
                         }
 
-                    if hasattr(msg, 'content') and msg.content: # [ 4 ]
+                    if _is_tool_result_message(msg):
+                        tool_messages.append(msg)
+
+                    if hasattr(msg, 'content') and msg.content:
                         if not (hasattr(msg, 'tool_calls') and msg.tool_calls):
-                            final_message = msg.content
+                            if not _is_tool_result_message(msg):
+                                final_message = msg.content
                             try:
                                 result = json.loads(msg.content)
                                 if result.get("success") and "files" in result:
@@ -334,11 +515,19 @@ class FileManagementAgent:
                             except (json.JSONDecodeError, TypeError):
                                 pass
 
-        yield { # [ 5 ]
+        file_content_data = _extract_file_content_from_tools(tool_messages)
+        if file_content_data:
+            logger.info(
+                f"[FILE AGENT] 파일 원문 추출: {file_content_data.get('filename')} "
+                f"({len(file_content_data.get('content', ''))} chars)"
+            )
+
+        yield {
             "is_task_complete": True,
             "require_user_input": False,
             "content": final_message if final_message else "응답을 생성하지 못했습니다.",
-            "data": file_list_data
+            "data": file_list_data or file_content_data,
+            "file_content": file_content_data,
         }
 
 """
