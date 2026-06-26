@@ -31,18 +31,6 @@
 | File Management | 10013 | Google Drive 파일 검색·읽기·업로드 |
 | Report Writing | 10014 | 양식 예시(`format_example`) 기반 보고서 작성 |
 
-## 보고서 작성 흐름
-
-Orchestrator가 upstream 결과를 `[REPORT_CONTEXT]` JSON으로 Report Agent에 전달합니다.
-
-| 필드 | 출처 | 용도 |
-|------|------|------|
-| `format_example` | Drive 양식 파일 전문 (`test.txt` 등) | **형식·구조** 그대로 mimic |
-| `sources` (content) | `web_research` 등 | **본문**에 쓸 조사 자료 |
-| `report_topic` | 사용자 질문 | 보고서 주제 (예: SQL) |
-
-**내장 양식** (`executive_summary`, `research_report`, `technical_report`, `meeting_minutes`, `general`)은 Drive 양식 파일이 없을 때만 사용됩니다.
-
 ### 워크플로우 예시
 
 ```
