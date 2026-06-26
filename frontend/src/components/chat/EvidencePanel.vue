@@ -40,6 +40,98 @@ const itemCount = computed(() => (
 const canRunNews = computed(() => Boolean(newsQuery.value.trim()) && !props.busy)
 const canRunUrl = computed(() => isHttpUrl(urlValue.value.trim()) && !props.busy)
 const noValueQuickRunCapabilities = new Set(['list_files', 'list_templates'])
+const capabilityInputCopy = {
+  route_request: {
+    label: '요청 내용',
+    placeholder: '예: 업로드한 문서를 요약하고 최신 뉴스와 비교해줘',
+    help: '오케스트레이터가 필요한 에이전트 실행 계획을 만듭니다.',
+  },
+  web_search: {
+    label: '검색 주제',
+    placeholder: '예: AI 에이전트 시장',
+    help: '웹 검색을 켜고 출처가 포함된 답변을 요청합니다.',
+  },
+  news_search: {
+    label: '뉴스 주제',
+    placeholder: '예: AI 에이전트 투자 동향',
+    help: '최신 뉴스성 정보를 우선 검색합니다.',
+  },
+  url_fetch: {
+    label: '분석할 URL',
+    placeholder: 'https://example.com/report',
+    help: 'URL 본문을 가져와 핵심 내용을 요약합니다.',
+  },
+  rag_vector_search: {
+    label: '문서 검색 질문',
+    placeholder: '예: 휴가 규정에서 승인 절차 찾아줘',
+    help: '인덱싱된 내부 문서에서 의미 기반 근거를 찾습니다.',
+  },
+  rag_sql_search: {
+    label: '메타데이터 조건',
+    placeholder: '예: 2026년 PDF 문서',
+    help: '문서 유형, 날짜, 작성자 같은 조건으로 문서를 찾습니다.',
+  },
+  rag_index: {
+    label: 'Drive 파일 ID',
+    placeholder: 'gdrive://file/... 또는 파일 ID',
+    help: 'Drive 파일을 검색 가능한 문서로 인덱싱합니다.',
+  },
+  upload_file: {
+    label: '저장할 내용',
+    placeholder: 'Drive에 저장할 Markdown 또는 텍스트',
+    help: '입력 내용을 새 Drive 파일로 저장하도록 요청합니다.',
+  },
+  download_file: {
+    label: 'Drive 파일 ID',
+    placeholder: 'gdrive://file/... 또는 파일 ID',
+    help: '해당 파일의 다운로드 또는 열기 링크를 준비합니다.',
+  },
+  get_file_info: {
+    label: 'Drive 파일 ID',
+    placeholder: 'gdrive://file/... 또는 파일 ID',
+    help: '파일명, 크기, 형식, 링크 같은 메타데이터를 조회합니다.',
+  },
+  find_folder: {
+    label: '폴더명',
+    placeholder: '예: 주간 보고서',
+    help: 'Drive에서 이름이 일치하거나 포함된 폴더를 찾습니다.',
+  },
+  list_files: {
+    label: '필터 조건',
+    placeholder: '검색어 또는 폴더명 (비워도 실행 가능)',
+    help: '비워두면 Drive 파일 목록을 조회합니다.',
+  },
+  delete_file: {
+    label: 'Drive 파일 ID',
+    placeholder: 'gdrive://file/... 또는 파일 ID',
+    help: '해당 Drive 파일을 휴지통으로 이동하도록 요청합니다.',
+  },
+  update_file: {
+    label: '변경 요청',
+    placeholder: '예: fileId=... name=새파일명.pdf',
+    help: '파일 이름 또는 내용을 바꾸는 요청을 보냅니다.',
+  },
+  create_folder: {
+    label: '폴더명',
+    placeholder: '예: 2026 리서치 자료',
+    help: 'Drive에 새 폴더를 생성하도록 요청합니다.',
+  },
+  write_report: {
+    label: '문서 내용',
+    placeholder: '보고서로 정리할 내용이나 주제',
+    help: 'Markdown 문서 형태로 구조화하도록 요청합니다.',
+  },
+  format_report: {
+    label: '정리할 내용',
+    placeholder: '양식에 맞춰 정리할 원문 또는 주제',
+    help: '선택된 보고서 양식이 있으면 함께 전달합니다.',
+  },
+  list_templates: {
+    label: '추가 조건',
+    placeholder: '비워도 실행 가능',
+    help: '사용 가능한 보고서 양식 목록과 용도를 조회합니다.',
+  },
+}
 
 const tabs = [
   { id: 'sources', label: '출처' },
@@ -80,18 +172,24 @@ function submitUrlFetch() {
   emit('run-capability', { capabilityId: 'url_fetch', value })
 }
 
-function capabilityPlaceholder(capability) {
-  const capabilityId = capability?.capabilityId
-  if (capabilityId === 'url_fetch') return 'https://example.com/report'
-  if (capabilityId === 'rag_index') return 'gdrive://file/abc123'
-  if (capabilityId === 'download_file' || capabilityId === 'get_file_info' || capabilityId === 'delete_file') {
-    return '파일 ID 또는 gdrive://file/...'
+function capabilityInputConfig(capability) {
+  return capabilityInputCopy[capability?.capabilityId] || {
+    label: '실행 입력',
+    placeholder: '요청할 주제나 조건',
+    help: '입력값과 함께 해당 기능을 바로 실행합니다.',
   }
-  if (capabilityId === 'update_file') return '파일 ID와 변경할 이름 또는 내용'
-  if (capabilityId === 'find_folder' || capabilityId === 'create_folder') return '폴더명'
-  if (capabilityId === 'list_files') return '검색어 또는 폴더명 (선택)'
-  if (capabilityId === 'list_templates') return '입력 없이 실행 가능'
-  return '요청할 주제나 조건'
+}
+
+function capabilityInputLabel(capability) {
+  return capabilityInputConfig(capability).label
+}
+
+function capabilityPlaceholder(capability) {
+  return capabilityInputConfig(capability).placeholder
+}
+
+function capabilityHelp(capability) {
+  return capabilityInputConfig(capability).help
 }
 
 function updateCapabilityValue(capabilityId, event) {
@@ -289,14 +387,18 @@ function isHttpUrl(value) {
               <small v-if="capability.uiSurface">{{ capability.uiSurface }}</small>
             </footer>
             <form class="capability-card-runner" @submit.prevent="runCapability(capability)">
-              <input
-                :value="capabilityValues[capability.capabilityId] || ''"
-                type="text"
-                :placeholder="capabilityPlaceholder(capability)"
-                :aria-label="`${capability.label} 실행 입력`"
-                data-testid="capability-run-input"
-                @input="updateCapabilityValue(capability.capabilityId, $event)"
-              >
+              <label class="capability-run-field">
+                <span>{{ capabilityInputLabel(capability) }}</span>
+                <input
+                  :value="capabilityValues[capability.capabilityId] || ''"
+                  type="text"
+                  :placeholder="capabilityPlaceholder(capability)"
+                  :aria-label="`${capability.label} 실행 입력`"
+                  data-testid="capability-run-input"
+                  @input="updateCapabilityValue(capability.capabilityId, $event)"
+                >
+                <small>{{ capabilityHelp(capability) }}</small>
+              </label>
               <button
                 type="button"
                 data-testid="capability-run-button"
@@ -497,6 +599,19 @@ p {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: start;
+}
+
+.capability-run-field {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.capability-run-field span {
+  color: var(--m001-muted);
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .capability-card-runner input {
@@ -511,8 +626,15 @@ p {
   padding: 0 10px;
 }
 
+.capability-run-field small {
+  color: var(--m001-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .capability-card-runner button {
   min-height: 32px;
+  margin-top: 21px;
   padding: 0 10px;
   border: 1px solid var(--m001-border-strong);
   border-radius: var(--m001-radius-control);
