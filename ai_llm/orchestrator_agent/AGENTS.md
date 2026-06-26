@@ -15,6 +15,9 @@ The orchestrator analyzes user intent, creates a plan, calls remote agents, and 
 
 - Forward child agent artifacts as named A2A artifacts so backend adapters can normalize them.
 - Do not collapse structured child data into only natural language when the frontend may need files, sources, or progress.
+- Regardless of the child agents' raw response formats, produce the final user-facing `answer` as Markdown.
+- Use Markdown for meaningful emphasis and structure: headings, bold text, lists, tables, links, and code fences when they improve readability.
+- Keep structured artifacts separate from the Markdown answer so the frontend can render both rich text and machine-readable evidence.
 
 ## Tests
 

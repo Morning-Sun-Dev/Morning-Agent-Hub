@@ -31,6 +31,7 @@ Morning Agent Hub is an A2A-based multi-agent application. The frontend sends a 
 - Shared frontend/backend/orchestrator shapes live in `common/contracts.py`.
 - Backend route models should extend or adapt the common contract instead of inventing incompatible shapes.
 - `/api/chat` uses `message`, `session_id`, `attachments`, and `requested_capabilities`. Do not reintroduce legacy `query` requests.
+- The final user-facing answer is Markdown. Child agents may return any useful artifact shape, but the orchestrator must prepare the final `answer` as Markdown and downstream layers must preserve it.
 - Preserve artifact metadata that the UI needs: `sources`, `files`, `progress`, `artifacts`, `run_id`, `status`, and `error`.
 
 ## Local File Guidance

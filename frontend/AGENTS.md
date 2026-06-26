@@ -10,6 +10,8 @@ This folder owns the Vue 3 frontend, API adapter, chat UI components, and fronte
 - Normalize backend responses in `frontend/src/api.js` and `frontend/src/models/chatModels.js`; avoid ad hoc response parsing inside components.
 - Do not duplicate backend or agent business logic in the UI.
 - The UI must expose message input, file attachment state, answer rendering, sources, generated/downloadable files, progress, and error recovery when backend data is available.
+- Render assistant answers as Markdown because the orchestrator uses Markdown to convey hierarchy, emphasis, links, tables, lists, and code.
+- Markdown rendering must be safe: do not execute raw HTML or script content, and keep external links/file links controlled by the normalized model.
 - Keep test-only placeholder components out of production routes once a real component exists.
 
 ## Design Rules

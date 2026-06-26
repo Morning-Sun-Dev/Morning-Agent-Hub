@@ -19,6 +19,8 @@ This folder owns the FastAPI gateway, REST routes, SSE chat stream, Supabase acc
 - Keep SSE events parseable JSON with explicit `type` fields and a final `[DONE]` event.
 - Preserve attachments and requested capabilities when building orchestrator prompts.
 - Keep prior chat history out of RAG query prompts unless a task explicitly changes that behavior and updates tests.
+- Treat `ChatResponse.answer` and SSE answer `content` as Markdown. Do not strip Markdown emphasis, lists, links, tables, or code fences during adaptation.
+- Sanitize or validate unsafe URLs and file links separately from Markdown preservation.
 
 ## Verification
 
