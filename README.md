@@ -125,6 +125,9 @@ cd ai_llm/orchestrator_agent && python agent_server.py      # :10010
 | `/api/sessions` | GET | 채팅 세션 목록 |
 | `/api/sessions/{id}/messages` | GET | 세션 대화 기록 |
 | `/api/files/upload` | POST | 파일 Drive 업로드 + RAG 인덱싱 |
+| `/api/files` | GET | Drive 파일 목록 |
+| `/api/files/{file_id}` | GET | Drive 파일 메타데이터 |
+| `/api/files/{file_id}/download` | GET | UI용 다운로드/열기 액션 |
 | `/api/capabilities` | GET | 에이전트 기능 및 UI 지원 상태 목록 |
 | `/api/report-templates` | GET | 보고서 양식 목록 |
 | `/docs` | GET | Swagger UI |

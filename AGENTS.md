@@ -18,12 +18,16 @@ Morning Agent Hub is an A2A-based multi-agent application. The frontend sends a 
 - Use a focused branch name such as `docs/agent-guidelines`, `feature/m001-chat-ui`, or `fix/backend-chat-route-owner`.
 - Stage only explicit pathspecs for files changed by the task.
 - In PRs, include changed module IDs when applicable, the contract surface changed, and the verification commands run.
+- For parallel work, assign one clear write owner per area before editing: backend routes, frontend API/models, frontend presentation components, common contracts/registry, tests, or one A2A agent.
+- Do not resolve merge conflicts in another contributor's PR branch without explicit approval. If a PR conflicts, report the files and let the owner or user review the resolution.
+- After a PR is merged into `dev`, rebase or recreate follow-up branches from the updated `origin/dev` before continuing dependent work.
 
 ## Verification
 
 - Backend and contract changes: `.venv/bin/python -m pytest -p no:cacheprovider tests -q`.
 - Python syntax check when touching backend, common, or agent files: `.venv/bin/python -m py_compile <changed python files>`.
 - Frontend changes: `npm --prefix frontend run test:run` and `npm --prefix frontend run build`.
+- Live integration confidence: run `.venv/bin/python scripts/smoke_system.py --skip-chat --json` after the backend and agents are online; run the full smoke without `--skip-chat` before claiming chat stream integration works end to end.
 - Before committing: `git diff --check` and, after staging, `git diff --cached --check`.
 
 ## Contract Rules
