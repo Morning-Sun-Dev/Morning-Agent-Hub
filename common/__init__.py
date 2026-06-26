@@ -32,6 +32,22 @@ from .schemas import (
 )
 from .a2a_client import A2AClientWrapper
 from .config import AgentConfig, get_agent_urls
+from .contracts import (
+    AgentId,
+    ArtifactEnvelope,
+    ArtifactKind,
+    CapabilityDescriptor,
+    CapabilityId,
+    ChatRequestContract,
+    ChatResponseContract,
+    FileArtifactContract,
+    PlanStepContract,
+    ProgressItemContract,
+    RunEventContract,
+    RunStatus,
+    SourceContract,
+    StepStatus,
+)
 
 __all__ = [
     # A2A SDK 네이티브 타입
@@ -67,4 +83,19 @@ __all__ = [
     'A2AClientWrapper',
     'AgentConfig',
     'get_agent_urls',
+    # 프론트엔드/백엔드/오케스트레이터 계약
+    'AgentId',
+    'ArtifactEnvelope',
+    'ArtifactKind',
+    'CapabilityDescriptor',
+    'CapabilityId',
+    'ChatRequestContract',
+    'ChatResponseContract',
+    'FileArtifactContract',
+    'PlanStepContract',
+    'ProgressItemContract',
+    'RunEventContract',
+    'RunStatus',
+    'SourceContract',
+    'StepStatus',
 ]
