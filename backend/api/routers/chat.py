@@ -32,9 +32,26 @@ async def get_a2a_client() -> A2AClientWrapper:
 # ── Supabase 헬퍼 (동기) ───────────────────────────
 
 def _ensure_session_sync(session_id: str | None, first_message: str) -> str:
-    if session_id:
-        return session_id
     sb = get_supabase()
+
+    if session_id:
+        existing = (
+            sb.table("chat_sessions")
+            .select("id")
+            .eq("id", session_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if existing:
+            return session_id
+
+        sb.table("chat_sessions").insert({
+            "id": session_id,
+            "title": first_message[:40],
+        }).execute()
+        return session_id
+
     new_id = uuid4().hex
     sb.table("chat_sessions").insert({
         "id": new_id,
