@@ -71,7 +71,7 @@ async def test_stream_direct_response():
 
     final = chunks[-1]
     assert final["is_task_complete"] is True
-    assert final["content"] == "안녕하세요!"
+    assert final["content"] == "**[AI 직접 답변]** 사내 문서를 참조하지 않은 답변입니다.\n\n안녕하세요!"
 
 
 @pytest.mark.asyncio
@@ -200,14 +200,14 @@ async def test_stream_includes_trace_from_agents():
     mock_structured.invoke.return_value = mock_plan
 
     with patch.object(orch, "execute_plan", return_value=[mock_agent_result]):
-        with patch.object(orch, "generate_final_response", return_value="최종 답변"):
-            chunks = []
-            async for chunk in orch.stream("AI 트렌드 알려줘"):
-                chunks.append(chunk)
+        chunks = []
+        async for chunk in orch.stream("AI 트렌드 알려줘"):
+            chunks.append(chunk)
 
     final = chunks[-1]
     assert final["is_task_complete"] is True
-    assert final["content"] == "최종 답변"
+    assert final["content"].startswith("**[웹 검색 기반]**")
+    assert "AI 트렌드 결과" in final["content"]
     assert len(final["trace"]) == 1
     assert final["trace"][0]["agent"] == "web_research"
     assert final["trace"][0]["duration_ms"] == 500
@@ -282,3 +282,38 @@ async def test_call_agent_fails_after_max_retries():
     assert result.success is False
     assert result.trace.status == "failed"
     assert call_count == 3  # 최대 3회 재시도 후 실패
+
+
+@pytest.mark.asyncio
+async def test_generate_final_response_requests_markdown_output():
+    """통합 답변 생성은 최종 사용자 응답을 Markdown으로 요구한다"""
+    from agent import OrchestratorAgent
+    import agent as agent_module
+
+    captured_messages = []
+
+    class FakeFinalLLM:
+        async def ainvoke(self, messages):
+            captured_messages.extend(messages)
+            response = MagicMock()
+            response.content = "## 최종 답변\n\n**핵심:** 완료"
+            return response
+
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    results = [
+        AgentResult(
+            agent="web_research",
+            success=True,
+            content="검색 결과",
+            trace=TraceStep(step=0, agent="web_research", status="completed", message="완료"),
+        )
+    ]
+
+    with patch.object(agent_module, "ChatOpenAI", return_value=FakeFinalLLM()):
+        content = await orch.generate_final_response("요약해줘", results)
+
+    assert content.startswith("## 최종 답변")
+    system_prompt = captured_messages[0]["content"]
+    assert "Markdown" in system_prompt
+    assert "headings" in system_prompt
+    assert "bold" in system_prompt
