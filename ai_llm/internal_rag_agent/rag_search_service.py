@@ -99,10 +99,11 @@ def search_documents(
     query: str,
     sb: Client,
     filters: Optional[Dict[str, Any]] = None,
-    match_count: int = 5,
+    match_count: int = 10,
+    match_threshold: float = 0.3,
 ) -> Tuple[List[Dict[str, Any]], List[Source]]:
     """
-    벡터 유사도 기반 문서 검색
+    벡터 유사도 기반 문서 검색 — 쿼리 재작성 + 멀티 쿼리 + 중복 제거
 
     M-007 RAG Search Service 핵심 인터페이스
 
@@ -110,26 +111,40 @@ def search_documents(
         query: 자연어 검색 질의
         sb: Supabase 클라이언트
         filters: 추가 후처리 필터 (document_type, filename_contains)
-        match_count: 반환할 최대 결과 수 (기본 5)
+        match_count: 최종 반환할 최대 결과 수 (기본 10)
+        match_threshold: 유사도 최소값 (기본 0.3)
 
     Returns:
         (raw_results, sources)
     """
     logger.info(f"[RAG SEARCH] 벡터 검색 시작: {query[:50]}...")
 
-    query_embedding = _embeddings.embed_query(query)
+    # 1. 쿼리 재작성 + 멀티 쿼리 생성
+    rewritten = rewrite_query(query)
+    extra_queries = generate_multi_queries(rewritten)
+    all_queries = [rewritten] + extra_queries
 
-    try:
-        response = sb.rpc("match_documents", {
-            "query_embedding": query_embedding,
-            "match_count": match_count,
-        }).execute()
-        results: List[Dict] = response.data or []
-    except Exception as e:
-        logger.error(f"[RAG SEARCH] 벡터 검색 오류: {e}")
-        results = []
+    # 2. 각 쿼리 순차 실행 — storage_ref:chunk_index 키로 중복 제거 (높은 유사도 우선)
+    seen: Dict[str, Dict] = {}
+    for q in all_queries:
+        q_embedding = _embeddings.embed_query(q)
+        try:
+            response = sb.rpc("match_documents", {
+                "query_embedding": q_embedding,
+                "match_count": match_count,
+                "match_threshold": match_threshold,
+            }).execute()
+            for r in (response.data or []):
+                key = f"{r.get('storage_ref')}:{r.get('chunk_index')}"
+                if key not in seen or r.get("similarity", 0) > seen[key].get("similarity", 0):
+                    seen[key] = r
+        except Exception as e:
+            logger.error(f"[RAG SEARCH] 쿼리 검색 오류 ({q[:30]}): {e}")
 
-    # 후처리 필터
+    # 3. 유사도 내림차순 정렬, 상위 match_count개
+    results: List[Dict] = sorted(seen.values(), key=lambda r: r.get("similarity", 0), reverse=True)[:match_count]
+
+    # 4. 후처리 필터
     if filters and results:
         doc_type = filters.get("document_type")
         kw = (filters.get("filename_contains") or "").lower()
@@ -150,8 +165,54 @@ def search_documents(
         for r in results
     ]
 
-    logger.info(f"[RAG SEARCH] 벡터 검색 결과: {len(results)}개")
+    logger.info(f"[RAG SEARCH] 최종 검색 결과: {len(results)}개 (쿼리 {len(all_queries)}개 사용)")
     return results, sources
+
+
+def rewrite_query(question: str) -> str:
+    """사용자 질문을 검색 최적화 쿼리로 재작성 (gpt-4o-mini). 실패 시 원본 반환."""
+    try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "사용자 질문을 문서 검색에 최적화된 한국어 키워드 중심 문장으로 재작성하세요. "
+                    "구어체 표현을 제거하고 핵심 명사와 동사만 남기세요. "
+                    "재작성된 문장만 출력하세요."
+                ),
+            },
+            {"role": "user", "content": question},
+        ]
+        response = _llm.invoke(messages)
+        rewritten = response.content.strip()
+        logger.info(f"[RAG SEARCH] 쿼리 재작성: '{question[:30]}' → '{rewritten[:50]}'")
+        return rewritten
+    except Exception as e:
+        logger.warning(f"[RAG SEARCH] 쿼리 재작성 실패, 원본 사용: {e}")
+        return question
+
+
+def generate_multi_queries(rewritten_query: str) -> List[str]:
+    """재작성된 쿼리에서 표현을 달리한 3개 변형 쿼리 생성. 실패 시 빈 리스트 반환."""
+    try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "주어진 검색 쿼리를 의미는 같지만 표현을 달리한 3개의 한국어 쿼리로 변환하세요. "
+                    "각 쿼리는 줄바꿈으로 구분하고, 번호나 불릿 없이 쿼리만 출력하세요."
+                ),
+            },
+            {"role": "user", "content": rewritten_query},
+        ]
+        response = _llm.invoke(messages)
+        lines = [line.strip() for line in response.content.strip().splitlines() if line.strip()]
+        queries = lines[:3]
+        logger.info(f"[RAG SEARCH] 멀티 쿼리 생성: {len(queries)}개")
+        return queries
+    except Exception as e:
+        logger.warning(f"[RAG SEARCH] 멀티 쿼리 생성 실패: {e}")
+        return []
 
 
 def extract_sql_filters(question: str) -> Dict[str, Any]:
