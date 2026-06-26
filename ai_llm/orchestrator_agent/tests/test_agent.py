@@ -66,6 +66,100 @@ async def test_analyze_intent_direct():
 
 
 @pytest.mark.asyncio
+async def test_analyze_intent_does_not_force_default_web_search_capability():
+    """기본 web_search capability만으로 DIRECT 인사말을 웹 검색으로 바꾸지 않는다."""
+    mock_plan = IntentPlan(intent="DIRECT", direct_answer="안녕하세요!")
+
+    from agent import OrchestratorAgent
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    mock_llm = MagicMock()
+    orch.llm = mock_llm
+    mock_structured = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = mock_plan
+
+    result = await orch.analyze_intent("[현재 질문]\n안녕\n\n[요청 기능]\nweb_search")
+
+    assert result.intent == "DIRECT"
+    assert result.plan == []
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_appends_report_step_for_requested_report_capability():
+    """보고서 capability가 요청되면 LLM이 빠뜨린 report_writing 단계를 추가한다."""
+    mock_plan = IntentPlan(
+        intent="WEB_SEARCH",
+        plan=[PlanStep(agent="web_research", query="AI 에이전트 시장 조사", depends_on=None)],
+    )
+
+    from agent import OrchestratorAgent
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    mock_llm = MagicMock()
+    orch.llm = mock_llm
+    mock_structured = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = mock_plan
+
+    result = await orch.analyze_intent(
+        "[현재 질문]\nAI 에이전트 시장 정리\n\n[요청 기능]\nwrite_report, format_report"
+    )
+
+    assert result.intent == "HYBRID"
+    assert [step.agent for step in result.plan] == ["web_research", "report_writing"]
+    assert result.plan[1].depends_on == 0
+    assert "Markdown 문서" in result.plan[1].query
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_adds_file_step_for_download_capability():
+    """download_file capability가 요청되면 file_management 단계를 보강한다."""
+    mock_plan = IntentPlan(intent="DIRECT", direct_answer="확인했습니다.")
+
+    from agent import OrchestratorAgent
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    mock_llm = MagicMock()
+    orch.llm = mock_llm
+    mock_structured = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = mock_plan
+
+    result = await orch.analyze_intent(
+        "[현재 질문]\ngdrive://file/abc123 다운로드 링크 준비\n\n[요청 기능]\ndownload_file"
+    )
+
+    assert result.intent == "FILE_OPERATION"
+    assert len(result.plan) == 1
+    assert result.plan[0].agent == "file_management"
+    assert "gdrive://file/abc123" in result.plan[0].query
+
+
+@pytest.mark.asyncio
+async def test_analyze_intent_does_not_add_upload_metadata_step_for_attachments():
+    """첨부 업로드 메타데이터 capability는 중복 업로드 단계로 강제하지 않는다."""
+    mock_plan = IntentPlan(
+        intent="INTERNAL_SEARCH",
+        plan=[PlanStep(agent="internal_rag", query="첨부 파일 분석", depends_on=None)],
+    )
+
+    from agent import OrchestratorAgent
+    orch = OrchestratorAgent.__new__(OrchestratorAgent)
+    mock_llm = MagicMock()
+    orch.llm = mock_llm
+    mock_structured = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = mock_plan
+
+    result = await orch.analyze_intent(
+        "[현재 질문]\n첨부 파일 분석\n\n"
+        "[첨부 파일]\n- policy.pdf | status=ready | storage_ref=gdrive://file/abc\n\n"
+        "[요청 기능]\nupload_file, get_file_info, rag_vector_search"
+    )
+
+    assert result.intent == "INTERNAL_SEARCH"
+    assert [step.agent for step in result.plan] == ["internal_rag"]
+
+
+@pytest.mark.asyncio
 async def test_stream_direct_response():
     """DIRECT intent는 즉시 응답하는지 확인"""
     mock_plan = IntentPlan(intent="DIRECT", direct_answer="안녕하세요!")
