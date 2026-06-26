@@ -59,6 +59,20 @@ def test_build_chat_response_preserves_trace_sources_and_files():
     assert response.files[0].open_url.endswith("/abc/view")
 
 
+def test_build_chat_response_preserves_markdown_answer_verbatim():
+    markdown = "## 요약\n\n**핵심:** [출처](https://example.com)\n\n| 항목 | 값 |\n| --- | --- |\n| 상태 | 완료 |"
+    agent_response = AgentResponse(
+        success=True,
+        artifacts=[
+            {"name": "orchestrator_result", "text": markdown},
+        ],
+    )
+
+    response = build_chat_response(agent_response, session_id="session_md", run_id="run_md")
+
+    assert response.answer == markdown
+
+
 def test_build_chat_response_skips_invalid_trace_items():
     agent_response = AgentResponse(
         success=True,

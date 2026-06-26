@@ -362,7 +362,16 @@ class OrchestratorAgent:
         )
         final_llm = ChatOpenAI(model="gpt-4o")
         messages = [
-            {"role": "system", "content": "여러 에이전트의 결과를 통합하여 사용자에게 명확한 답변을 제공하세요."},
+            {
+                "role": "system",
+                "content": (
+                    "여러 에이전트의 결과를 통합하여 사용자에게 명확한 답변을 제공하세요. "
+                    "최종 답변은 반드시 Markdown으로 작성합니다. Use Markdown headings, "
+                    "bold emphasis, lists, tables, links, and fenced code blocks when they improve readability. "
+                    "근거, 파일, 진행 상태 같은 구조화 데이터는 본문에 억지로 합치지 말고 "
+                    "사용자가 읽어야 할 핵심 요약과 판단만 Markdown 본문에 담으세요."
+                ),
+            },
             {
                 "role": "user",
                 "content": f"원본 질문: {query}\n\n에이전트 결과:\n{results_text}\n\n위 정보를 바탕으로 답변해주세요.",
@@ -415,7 +424,7 @@ class OrchestratorAgent:
                 "is_task_complete": True,
                 "require_user_input": False,
                 "content": (
-                    "[AI 직접 답변] 사내 문서를 참조하지 않은 답변입니다.\n\n"
+                    "**[AI 직접 답변]** 사내 문서를 참조하지 않은 답변입니다.\n\n"
                     + plan.direct_answer
                 ),
                 "trace": trace,
@@ -488,12 +497,12 @@ class OrchestratorAgent:
                 and not self._is_rag_no_result(last_result.content):
             # RAG 답변: 이미 문서 기반으로 생성됨 — 재합성 없이 직접 반환
             # answer_from_documents()가 **출처:** 섹션을 이미 포함하므로 prefix만 추가
-            final_response = "[사내 문서 기반]\n\n" + last_result.content
+            final_response = "**[사내 문서 기반]**\n\n" + last_result.content
 
         elif last_result and last_result.agent == "web_research" and last_result.success:
             # 웹 폴백 결과: 사내 문서 미발견 안내 + 웹 출처 명시
             final_response = (
-                "[웹 검색 기반] 사내 문서에서 관련 내용을 찾지 못해 웹에서 검색했습니다.\n\n"
+                "**[웹 검색 기반]** 사내 문서에서 관련 내용을 찾지 못해 웹에서 검색했습니다.\n\n"
                 + (last_result.content or "웹에서도 관련 정보를 찾지 못했습니다.")
             )
 
