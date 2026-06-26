@@ -220,8 +220,14 @@ def test_capability_registry_covers_every_shared_capability():
     )
     assert any(
         item.capability_id == "url_fetch"
-        and item.ui_status == "partial"
-        and item.ui_surface == "기능 패널 요청 초안"
+        and item.ui_status == "available"
+        and "빠른 실행" in item.ui_surface
+        for item in capabilities
+    )
+    assert any(
+        item.capability_id == "news_search"
+        and item.ui_status == "available"
+        and "빠른 실행" in item.ui_surface
         for item in capabilities
     )
     assert any(

@@ -10,6 +10,8 @@ The orchestrator analyzes user intent, creates a plan, calls remote agents, and 
 - Use `DIRECT` only for greetings, simple acknowledgements, and feature explanations. Factual, policy, document, web, file, or report requests must route to an agent.
 - Preserve user constraints such as count, scope, target folder, output format, and language in each `PlanStep.query`.
 - Use `depends_on` when a later agent needs a prior result; leave it `None` only for truly independent work.
+- Treat ordinary information requests as normal Markdown answers, not reports.
+- Route to `report_writing` only when the user explicitly asks for a report/document/template/formatted deliverable, asks to save a report, or the frontend passes report capabilities such as `write_report` or `format_report`.
 
 ## Artifact Rules
 

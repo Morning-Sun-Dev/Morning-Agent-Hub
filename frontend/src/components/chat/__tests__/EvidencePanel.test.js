@@ -132,4 +132,27 @@ describe('EvidencePanel', () => {
 
     expect(wrapper.emitted('select-capability')).toEqual([[capability]])
   })
+
+  it('emits web capability quick-run inputs from the capability panel', async () => {
+    const wrapper = mount(EvidencePanel, {
+      props: {
+        sources: [],
+        files: [],
+        progress: [],
+        capabilities: [],
+        activeTab: 'capabilities',
+      },
+    })
+
+    await wrapper.get('[data-testid="news-query-input"]').setValue('AI 에이전트 시장')
+    await wrapper.get('[data-testid="news-search-button"]').trigger('click')
+
+    await wrapper.get('[data-testid="url-fetch-input"]').setValue('https://example.com/report')
+    await wrapper.get('[data-testid="url-fetch-button"]').trigger('click')
+
+    expect(wrapper.emitted('run-capability')).toEqual([
+      [{ capabilityId: 'news_search', value: 'AI 에이전트 시장' }],
+      [{ capabilityId: 'url_fetch', value: 'https://example.com/report' }],
+    ])
+  })
 })

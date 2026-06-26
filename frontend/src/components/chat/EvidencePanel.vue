@@ -14,6 +14,7 @@ const props = defineProps({
   folderNotice: { type: String, default: '' },
   activeTab: { type: String, default: 'sources' },
   mobileCollapsed: { type: Boolean, default: false },
+  busy: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -25,13 +26,18 @@ const emit = defineEmits([
   'find-folder',
   'create-folder',
   'select-capability',
+  'run-capability',
 ])
 const expanded = ref(false)
 const folderName = ref('')
+const newsQuery = ref('')
+const urlValue = ref('')
 const showMobileSummary = computed(() => props.mobileCollapsed && !expanded.value)
 const itemCount = computed(() => (
   props.sources.length + props.files.length + props.folders.length + props.progress.length + props.capabilities.length
 ))
+const canRunNews = computed(() => Boolean(newsQuery.value.trim()) && !props.busy)
+const canRunUrl = computed(() => isHttpUrl(urlValue.value.trim()) && !props.busy)
 
 const tabs = [
   { id: 'sources', label: '출처' },
@@ -58,6 +64,27 @@ function submitFolderSearch() {
 function submitFolderCreate() {
   const name = folderName.value.trim()
   if (name) emit('create-folder', name)
+}
+
+function submitNewsSearch() {
+  const value = newsQuery.value.trim()
+  if (!value || props.busy) return
+  emit('run-capability', { capabilityId: 'news_search', value })
+}
+
+function submitUrlFetch() {
+  const value = urlValue.value.trim()
+  if (!isHttpUrl(value) || props.busy) return
+  emit('run-capability', { capabilityId: 'url_fetch', value })
+}
+
+function isHttpUrl(value) {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 </script>
 
@@ -162,6 +189,46 @@ function submitFolderCreate() {
         </div>
 
         <div v-if="activeTab === 'capabilities'" class="panel-stack">
+          <section class="capability-tools" aria-label="웹 기능 빠른 실행">
+            <form class="capability-tool" @submit.prevent="submitNewsSearch">
+              <label>
+                <span>뉴스 주제</span>
+                <input
+                  v-model="newsQuery"
+                  type="text"
+                  placeholder="AI 에이전트 시장"
+                  data-testid="news-query-input"
+                >
+              </label>
+              <button
+                type="button"
+                data-testid="news-search-button"
+                :disabled="!canRunNews"
+                @click="submitNewsSearch"
+              >
+                뉴스 검색
+              </button>
+            </form>
+            <form class="capability-tool" @submit.prevent="submitUrlFetch">
+              <label>
+                <span>URL</span>
+                <input
+                  v-model="urlValue"
+                  type="url"
+                  placeholder="https://example.com/report"
+                  data-testid="url-fetch-input"
+                >
+              </label>
+              <button
+                type="button"
+                data-testid="url-fetch-button"
+                :disabled="!canRunUrl"
+                @click="submitUrlFetch"
+              >
+                URL 분석
+              </button>
+            </form>
+          </section>
           <div v-if="capabilities.length === 0" class="empty-panel">
             <span>c</span>
             <strong>기능 정보를 불러오지 못했습니다</strong>
@@ -313,6 +380,60 @@ p {
   border: 1px solid var(--m001-border);
   border-radius: var(--m001-radius-card);
   background: white;
+}
+
+.capability-tools {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--m001-border);
+  border-radius: var(--m001-radius-card);
+  background: var(--m001-panel-subtle);
+}
+
+.capability-tool {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.capability-tool label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--m001-muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.capability-tool input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--m001-border);
+  border-radius: var(--m001-radius-control);
+  background: white;
+  color: var(--m001-text);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 10px;
+}
+
+.capability-tool button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--m001-border-strong);
+  border-radius: var(--m001-radius-control);
+  background: white;
+  color: var(--m001-text);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.capability-tool button:disabled {
+  color: var(--m001-muted);
+  cursor: not-allowed;
 }
 
 .file-notice {
@@ -519,11 +640,13 @@ p {
 }
 
 @media (max-width: 520px) {
-  .folder-tools {
+  .folder-tools,
+  .capability-tool {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .folder-tools button {
+  .folder-tools button,
+  .capability-tool button {
     width: 100%;
   }
 }

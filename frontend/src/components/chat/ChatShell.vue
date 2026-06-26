@@ -97,6 +97,33 @@ function applyCapability(capability) {
   activePanel.value = 'capabilities'
 }
 
+function runPanelCapability(payload = {}) {
+  const capabilityId = payload.capabilityId
+  const value = typeof payload.value === 'string' ? payload.value.trim() : ''
+  if (!capabilityId || !value || isBusy()) return
+
+  const text = capabilityRequestText(capabilityId, value)
+  if (!text) return
+
+  dispatchRequest({
+    text,
+    displayText: text,
+    attachments: [],
+    capabilities: requestedCapabilities({ attachments: [], extraCapabilities: [capabilityId] }),
+    preservedDraft: draft.value,
+  })
+}
+
+function capabilityRequestText(capabilityId, value) {
+  if (capabilityId === 'news_search') {
+    return `다음 주제의 최신 뉴스와 핵심 변화를 출처와 함께 요약해줘:\n${value}`
+  }
+  if (capabilityId === 'url_fetch') {
+    return `다음 URL 내용을 가져와 핵심 내용을 요약해줘:\n${value}`
+  }
+  return ''
+}
+
 function startNewChat() {
   stopStream?.()
   stopStream = null
@@ -447,6 +474,7 @@ onBeforeUnmount(() => {
           :capabilities="capabilities"
           :file-notice="fileNotice"
           :folder-notice="folderNotice"
+          :busy="isBusy()"
           @inspect-file="inspectFile"
           @prepare-download="prepareFileDownload"
           @rename-file="renameDriveFile"
@@ -454,6 +482,7 @@ onBeforeUnmount(() => {
           @find-folder="findDriveFolder"
           @create-folder="createDriveFolder"
           @select-capability="applyCapability"
+          @run-capability="runPanelCapability"
         />
 
         <div class="composer-wrap">
@@ -483,6 +512,7 @@ onBeforeUnmount(() => {
         :capabilities="capabilities"
         :file-notice="fileNotice"
         :folder-notice="folderNotice"
+        :busy="isBusy()"
         @inspect-file="inspectFile"
         @prepare-download="prepareFileDownload"
         @rename-file="renameDriveFile"
@@ -490,6 +520,7 @@ onBeforeUnmount(() => {
         @find-folder="findDriveFolder"
         @create-folder="createDriveFolder"
         @select-capability="applyCapability"
+        @run-capability="runPanelCapability"
       />
 
     </main>

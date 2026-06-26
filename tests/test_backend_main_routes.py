@@ -45,6 +45,20 @@ def test_backend_main_exposes_capability_registry():
         for item in payload
     )
     assert any(
+        item["agent_id"] == "web_research"
+        and item["capability_id"] == "news_search"
+        and item["ui_status"] == "available"
+        and "빠른 실행" in item["ui_surface"]
+        for item in payload
+    )
+    assert any(
+        item["agent_id"] == "web_research"
+        and item["capability_id"] == "url_fetch"
+        and item["ui_status"] == "available"
+        and "빠른 실행" in item["ui_surface"]
+        for item in payload
+    )
+    assert any(
         item["agent_id"] == "file_management"
         and item["capability_id"] == "delete_file"
         and item["ui_status"] == "available"
