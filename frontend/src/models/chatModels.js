@@ -70,6 +70,13 @@ export function normalizeFileArtifact(file = {}) {
   return {
     ...artifact,
     fileId: file.file_id || file.fileId || artifact.fileId,
+    mimeType: file.mime_type || file.mimeType || artifact.mimeType,
+    size: normalizeFileSize(file.size ?? artifact.size),
+    createdAt: file.created_time || file.createdTime || file.created_at || file.createdAt || null,
+    modifiedAt: file.modified_time || file.modifiedTime || file.modified_at || file.modifiedAt || null,
+    description: file.description || '',
+    isTrashed: Boolean(file.is_trashed ?? file.isTrashed ?? file.trashed ?? false),
+    detailChecked: Boolean(file.detail_checked || file.detailChecked),
   }
 }
 
@@ -167,6 +174,12 @@ function normalizeFileStatus(status) {
     return 'ready'
   }
   return status || 'ready'
+}
+
+function normalizeFileSize(size) {
+  if (size === null || size === undefined || size === '') return 0
+  const numeric = Number(size)
+  return Number.isFinite(numeric) ? numeric : 0
 }
 
 function toContractFileStatus(status) {

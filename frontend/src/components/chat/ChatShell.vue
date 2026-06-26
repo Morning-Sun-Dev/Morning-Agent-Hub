@@ -397,7 +397,7 @@ function fileActionId(file) {
 async function inspectFile(fileId) {
   try {
     const file = await getFileInfo(fileId)
-    updateDriveFile(fileId, file)
+    updateDriveFile(fileId, { ...file, detailChecked: true })
     fileNotice.value = `${file.name || '파일'} 상세 정보를 확인했습니다.`
     activePanel.value = 'files'
   } catch (err) {
