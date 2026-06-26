@@ -32,6 +32,7 @@ from .schemas import (
 )
 from .a2a_client import A2AClientWrapper
 from .config import AgentConfig, get_agent_urls
+from .capabilities import list_capabilities
 from .contracts import (
     AgentId,
     ArtifactEnvelope,
@@ -47,6 +48,7 @@ from .contracts import (
     RunStatus,
     SourceContract,
     StepStatus,
+    UiSupportStatus,
 )
 
 __all__ = [
@@ -83,6 +85,7 @@ __all__ = [
     'A2AClientWrapper',
     'AgentConfig',
     'get_agent_urls',
+    'list_capabilities',
     # 프론트엔드/백엔드/오케스트레이터 계약
     'AgentId',
     'ArtifactEnvelope',
@@ -98,4 +101,5 @@ __all__ = [
     'RunStatus',
     'SourceContract',
     'StepStatus',
+    'UiSupportStatus',
 ]

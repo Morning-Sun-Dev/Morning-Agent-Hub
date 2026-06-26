@@ -1,9 +1,10 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { streamChat, uploadFile } from '../../../api'
+import { getCapabilities, streamChat, uploadFile } from '../../../api'
 import ChatShell from '../ChatShell.vue'
 
 vi.mock('../../../api', () => ({
+  getCapabilities: vi.fn(),
   uploadFile: vi.fn(),
   streamChat: vi.fn(),
 }))
@@ -11,6 +12,26 @@ vi.mock('../../../api', () => ({
 describe('ChatShell', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    getCapabilities.mockResolvedValue([
+      {
+        agentId: 'web_research',
+        capabilityId: 'web_search',
+        label: '웹 검색',
+        description: '최신 정보를 검색합니다.',
+        enabled: true,
+        uiStatus: 'available',
+        uiSurface: '채팅 입력',
+      },
+      {
+        agentId: 'file_management',
+        capabilityId: 'delete_file',
+        label: 'Drive 파일 삭제',
+        description: 'Google Drive 파일을 삭제합니다.',
+        enabled: true,
+        uiStatus: 'planned',
+        uiSurface: '',
+      },
+    ])
     streamChat.mockImplementation((_message, _sessionId, handlers) => {
       handlers.onProgress({ stage: 'orchestrator', message: '작업 중', state: 'working' })
       handlers.onAnswer({ sessionId: 's1', content: '응답입니다.', sources: [], files: [], progress: [] })
@@ -26,6 +47,19 @@ describe('ChatShell', () => {
 
     expect(wrapper.text()).toContain('휴가 규정 알려줘')
     expect(wrapper.text()).toContain('응답입니다.')
+  })
+
+  it('shows agent capability coverage in the evidence panel', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '기능').trigger('click')
+
+    expect(getCapabilities).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('웹 검색')
+    expect(wrapper.text()).toContain('채팅 입력')
+    expect(wrapper.text()).toContain('Drive 파일 삭제')
+    expect(wrapper.text()).toContain('예정')
   })
 
   it('passes uploaded attachments and requested capabilities to the stream', async () => {

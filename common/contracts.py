@@ -38,6 +38,12 @@ CapabilityId = Literal[
     "list_templates",
 ]
 
+UiSupportStatus = Literal[
+    "available",
+    "partial",
+    "planned",
+]
+
 RunStatus = Literal[
     "queued",
     "planning",
@@ -76,6 +82,8 @@ class CapabilityDescriptor(BaseModel):
     label: str
     description: str
     enabled: bool = True
+    ui_status: UiSupportStatus = "planned"
+    ui_surface: str = ""
 
 
 class PlanStepContract(BaseModel):

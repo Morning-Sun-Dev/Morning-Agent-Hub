@@ -1,7 +1,7 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createMessage, createProgress } from '../../models/chatModels'
-import { streamChat, uploadFile } from '../../api'
+import { getCapabilities, streamChat, uploadFile } from '../../api'
 import ChatHeader from './ChatHeader.vue'
 import EvidencePanel from './EvidencePanel.vue'
 import MessageComposer from './MessageComposer.vue'
@@ -16,6 +16,7 @@ const runState = ref('idle')
 const progress = ref([])
 const sources = ref([])
 const generatedFiles = ref([])
+const capabilities = ref([])
 const error = ref(null)
 const sessionId = ref(null)
 const lastRequest = ref(null)
@@ -190,6 +191,14 @@ function isBusy() {
   return runState.value === 'running' || runState.value === 'uploading'
 }
 
+onMounted(async () => {
+  try {
+    capabilities.value = await getCapabilities()
+  } catch {
+    capabilities.value = []
+  }
+})
+
 onBeforeUnmount(() => {
   stopStream?.()
 })
@@ -228,6 +237,7 @@ onBeforeUnmount(() => {
           :sources="sources"
           :files="generatedFiles.length ? generatedFiles : attachments"
           :progress="progress"
+          :capabilities="capabilities"
         />
 
         <div class="composer-wrap">
@@ -250,6 +260,7 @@ onBeforeUnmount(() => {
         :sources="sources"
         :files="generatedFiles.length ? generatedFiles : attachments"
         :progress="progress"
+        :capabilities="capabilities"
       />
 
     </main>
