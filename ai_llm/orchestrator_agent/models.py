@@ -17,7 +17,7 @@ class PlanStep(BaseModel):
 
 class IntentPlan(BaseModel):
     """Intent 분류 및 실행 계획"""
-    intent: Literal["INTERNAL_SEARCH", "WEB_SEARCH", "FILE_OPERATION", "HYBRID", "DIRECT"]
+    intent: Literal["SEARCH", "FILE_OPERATION", "DIRECT"]
     plan: List[PlanStep] = Field(default_factory=list)
     direct_answer: Optional[str] = Field(
         default=None,

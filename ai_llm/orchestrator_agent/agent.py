@@ -47,23 +47,20 @@ SYSTEM_PROMPT = """당신은 사용자 요청을 분석하고 적절한 에이�
 4. 독립적으로 실행 가능한 단계는 depends_on을 null로 설정하세요.
 5. "하나만", "전부", "3개" 같은 조건도 그대로 전달하세요.
 
-의도 분류 기준:
-- INTERNAL_SEARCH: 사내 문서·가이드라인·정책·규정에 관한 모든 질문 → internal_rag
-- WEB_SEARCH: 외부 최신 정보·뉴스·트렌드 검색
-- FILE_OPERATION: Google Drive 파일 관리
-- HYBRID: 둘 이상의 에이전트 필요
+## 의도 분류 기준 (3가지만 사용)
+
+- SEARCH: 정보 검색·질문·조사 등 모든 정보성 요청
+  → plan에는 internal_rag, web_research를 포함하지 마세요 (자동 실행됨).
+  → 사용자가 "보고서 작성해줘", "문서로 정리해줘", "리포트 만들어줘" 등 보고서 작성을 명시적으로 요청한 경우에만 plan에 report_writing을 포함하세요.
+  → 단순 질문·검색 요청("~이 뭐야?", "~알려줘", "~찾아줘")에는 report_writing을 절대 포함하지 마세요.
+
+- FILE_OPERATION: Google Drive 파일 목록 조회·검색·업로드 등 파일 관리 전용
+  → plan에 file_management 포함. 이후 internal_rag 인덱싱이 필요하면 추가 가능.
+
 - DIRECT: 아래 경우에만 사용 (매우 엄격하게 적용)
   · 인사말 ("안녕", "고마워", "수고해")
   · 에이전트 기능 문의 ("뭘 할 수 있어?", "어떻게 사용해?")
   · 이전 답변에 대한 감사·확인 ("알겠어", "ok", "잘 됐어")
-
-## 중요: DIRECT 사용 금지 케이스
-아래 유형은 반드시 에이전트를 사용하세요. 절대로 DIRECT로 분류하지 마세요.
-- "~이 무엇인가?", "~란?", "~기준은?", "~조건은?", "~방법은?" 형태의 사실 질문
-- 등급·단계·기준·절차·원칙·정의를 묻는 질문
-- 법률·규정·가이드라인·정책 관련 질문
-- 문서·파일 내용을 묻는 모든 질문
-→ 이런 질문은 학습 데이터가 아닌 사내 문서에서 답해야 하므로 INTERNAL_SEARCH로 분류
 
 === 파일 인덱싱 워크플로우 (2단계) ===
 사용자: "보고서 폴더 파일 중 하나만 DB에 인덱싱해줘"
@@ -136,7 +133,7 @@ class OrchestratorAgent:
         if not api_key:
             raise ValueError("OPENAI_API_KEY 환경 변수가 필요합니다")
 
-        self.llm = ChatOpenAI(model="gpt-5.4-mini", temperature=0)
+        self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         self.httpx_client = None
         self.remote_agents: Dict[str, A2AClient] = {}
         self.initialized = False
@@ -479,7 +476,7 @@ class OrchestratorAgent:
             ensure_ascii=False,
             indent=2,
         )
-        final_llm = ChatOpenAI(model="gpt-4o")
+        final_llm = ChatOpenAI(model="gpt-4o-mini")
         messages = [
             {
                 "role": "system",
@@ -550,7 +547,8 @@ class OrchestratorAgent:
             }
             return
 
-        if not plan.plan:
+        # SEARCH는 plan.plan이 비어도 RAG → 웹 폴백으로 처리
+        if not plan.plan and plan.intent != "SEARCH":
             yield {
                 "is_task_complete": True,
                 "require_user_input": False,
@@ -559,40 +557,77 @@ class OrchestratorAgent:
             }
             return
 
-        yield {
-            "is_task_complete": False,
-            "require_user_input": False,
-            "content": f"📋 {len(plan.plan)}개 에이전트에 요청 중...",
-            "trace": trace,
-        }
+        if plan.plan:
+            yield {
+                "is_task_complete": False,
+                "require_user_input": False,
+                "content": f"📋 {len(plan.plan)}개 에이전트에 요청 중...",
+                "trace": trace,
+            }
 
-        results = await self.execute_plan(plan, user_query=query)
-        all_artifacts: List[Dict[str, Any]] = []
+        # SEARCH: plan 실행 전 RAG를 항상 먼저 실행
+        if plan.intent == "SEARCH":
+            yield {
+                "is_task_complete": False,
+                "require_user_input": False,
+                "content": "📄 사내 문서를 검색합니다...",
+                "trace": trace,
+            }
+            rag_result = await self._call_agent("internal_rag", query, step_index=0)
+            trace.append(rag_result.trace.model_dump())
+            all_artifacts: List[Dict[str, Any]] = []
+            all_artifacts.extend(rag_result.artifacts)
+            results = [rag_result]
 
-        for r in results:
-            trace.append(r.trace.model_dump())
-            all_artifacts.extend(r.artifacts)
-
-        # INTERNAL_SEARCH: RAG 결과가 없으면 웹 검색으로 자동 폴백
-        if plan.intent == "INTERNAL_SEARCH":
-            rag_result = next(
-                (r for r in results if r.agent == "internal_rag"),
-                None,
-            )
-            if rag_result and self._is_rag_no_result(rag_result.content):
-                logger.info("[ORCHESTRATOR] RAG 결과 없음 → 웹 검색 폴백")
+            rag_has_result = rag_result.success and not self._is_rag_no_result(rag_result.content)
+            if not rag_has_result:
+                logger.info("[ORCHESTRATOR] RAG 결과 없음(success=%s) → 웹 검색 폴백", rag_result.success)
                 yield {
                     "is_task_complete": False,
                     "require_user_input": False,
                     "content": "📄 사내 문서에서 찾지 못했습니다. 웹에서 검색합니다...",
                     "trace": trace,
                 }
-                web_result = await self._call_agent(
-                    "web_research", query, step_index=len(results)
-                )
+                web_result = await self._call_agent("web_research", query, step_index=1)
                 trace.append(web_result.trace.model_dump())
                 all_artifacts.extend(web_result.artifacts)
                 results.append(web_result)
+
+            # SEARCH plan에 report_writing / file_management 후속 단계가 있으면 추가 실행
+            # results에 RAG/웹 결과가 이미 있으므로 build_report_query로 context 주입
+            SEARCH_EXTRA_AGENTS = {"report_writing", "file_management"}
+            extra_steps = [s for s in plan.plan if s.agent in SEARCH_EXTRA_AGENTS]
+            if extra_steps:
+                extra_file_list: List[Dict[str, Any]] = []
+                extra_report_metadata: Dict[str, Any] = {}
+                for step in extra_steps:
+                    if step.agent == "report_writing":
+                        augmented_query = build_report_query(step, len(results), results, user_query=query)
+                    elif step.agent == "file_management":
+                        prev = results[-1] if results else None
+                        augmented_query = self._build_step_query(
+                            step, len(results), prev, results,
+                            extra_file_list, extra_report_metadata, query
+                        )
+                    else:
+                        prev = results[-1] if results else None
+                        context_text = self._format_prev_content(prev, step.agent) if (prev and prev.success) else ""
+                        augmented_query = (
+                            f"{step.query}\n\n[이전 에이전트 결과]:\n{context_text}"
+                            if context_text else step.query
+                        )
+                    extra_result = await self._call_agent(step.agent, augmented_query, step_index=len(results))
+                    trace.append(extra_result.trace.model_dump())
+                    all_artifacts.extend(extra_result.artifacts)
+                    results.append(extra_result)
+                    # report_writing 완료 시 metadata 추출 (file_management가 뒤에 올 경우 사용)
+                    self._update_artifact_context(extra_result, extra_file_list, extra_report_metadata)
+        else:
+            results = await self.execute_plan(plan, user_query=query)
+            all_artifacts = []
+            for r in results:
+                trace.append(r.trace.model_dump())
+                all_artifacts.extend(r.artifacts)
 
         yield {
             "is_task_complete": False,
@@ -601,32 +636,28 @@ class OrchestratorAgent:
             "trace": trace,
         }
 
-        last_agent = plan.plan[-1].agent if plan.plan else None
-        last_result = results[-1] if results else None
+        # 결과에서 에이전트별 성공 결과 추출
+        report_result = next((r for r in reversed(results) if r.agent == "report_writing" and r.success), None)
+        rag_success = next((r for r in results if r.agent == "internal_rag" and r.success and not self._is_rag_no_result(r.content)), None)
+        web_success = next((r for r in results if r.agent == "web_research" and r.success), None)
 
-        if last_agent == "report_writing" and last_result and last_result.success:
+        if report_result:
             # 보고서는 report_writing 에이전트 결과를 직접 반환 (재합성 불필요)
-            report_result = next(
-                (r for r in reversed(results) if r.agent == "report_writing" and r.success),
-                None,
-            )
-            final_response = report_result.content if report_result else "보고서를 생성하지 못했습니다."
+            final_response = report_result.content
 
-        elif last_result and last_result.agent == "internal_rag" and last_result.success \
-                and not self._is_rag_no_result(last_result.content):
+        elif rag_success:
             # RAG 답변: 이미 문서 기반으로 생성됨 — 재합성 없이 직접 반환
-            # answer_from_documents()가 **출처:** 섹션을 이미 포함하므로 prefix만 추가
-            final_response = "**[사내 문서 기반]**\n\n" + last_result.content
+            final_response = "**[사내 문서 기반]**\n\n" + rag_success.content
 
-        elif last_result and last_result.agent == "web_research" and last_result.success:
+        elif web_success:
             # 웹 폴백 결과: 사내 문서 미발견 안내 + 웹 출처 명시
             final_response = (
                 "**[웹 검색 기반]** 사내 문서에서 관련 내용을 찾지 못해 웹에서 검색했습니다.\n\n"
-                + (last_result.content or "웹에서도 관련 정보를 찾지 못했습니다.")
+                + (web_success.content or "웹에서도 관련 정보를 찾지 못했습니다.")
             )
 
         else:
-            # 그 외 멀티 에이전트 결과는 gpt-4o로 통합 요약
+            # 그 외 멀티 에이전트 결과는 gpt-4o-mini로 통합 요약
             raw = await self.generate_final_response(query, results)
             final_response = "> 💭 **AI 통합 답변**\n\n" + raw
 

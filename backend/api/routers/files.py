@@ -197,6 +197,11 @@ async def get_file_download(file_id: str):
     try:
         gdrive = get_gdrive_client()
         file_info = gdrive.get_file_info(file_id)
+        # file_id가 Drive ID가 아닌 파일명일 경우 이름으로 검색
+        if file_info is None:
+            results = gdrive.search_files_by_name(file_id, page_size=1)
+            if results:
+                file_info = results[0]
         if file_info is None:
             raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
 

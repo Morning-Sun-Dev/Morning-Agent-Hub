@@ -86,8 +86,8 @@ class ReportWritingAgent:
     """
 
     def __init__(self):
-        self.model = ChatOpenAI(model="gpt-4o", temperature=0.3)
-        self.model_format = ChatOpenAI(model="gpt-4o", temperature=0)
+        self.model = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        self.model_format = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         self.initialized = False
 
     async def initialize(self) -> None:

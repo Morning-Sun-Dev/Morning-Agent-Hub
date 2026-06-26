@@ -482,7 +482,7 @@ class FileManagementAgent:
         file_content_data = None
         tool_messages = []
 
-        for chunk in self.graph.stream({
+        async for chunk in self.graph.astream({
             "messages": [
                 ("system", FILE_AGENT_SYSTEM_PROMPT),
                 ("user", query),
