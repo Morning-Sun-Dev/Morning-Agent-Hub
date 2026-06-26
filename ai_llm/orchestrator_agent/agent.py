@@ -430,11 +430,20 @@ class OrchestratorAgent:
         last_result = results[-1] if results else None
 
         if last_agent == "report_writing" and last_result and last_result.success:
+            # 보고서는 report_writing 에이전트 결과를 직접 반환 (재합성 불필요)
             report_result = next(
                 (r for r in reversed(results) if r.agent == "report_writing" and r.success),
                 None,
             )
             final_response = report_result.content if report_result else "보고서를 생성하지 못했습니다."
+        elif last_agent == "internal_rag" and last_result and last_result.success:
+            # RAG 답변은 이미 문서 기반으로 생성됨 — generate_final_response()를 거치면
+            # gpt-4o가 학습 데이터로 재합성하여 환각이 발생하므로 직접 반환
+            rag_result = next(
+                (r for r in reversed(results) if r.agent == "internal_rag" and r.success),
+                None,
+            )
+            final_response = rag_result.content if rag_result else "문서에서 관련 내용을 찾지 못했습니다."
         else:
             final_response = await self.generate_final_response(query, results)
 
