@@ -216,7 +216,12 @@ async def delete_file(file_id: str):
     """Google Drive 파일 삭제"""
     try:
         gdrive = get_gdrive_client()
-        gdrive.delete_file(file_id)
-        return {"message": "삭제 완료", "file_id": file_id}
+        deleted = gdrive.delete_file(file_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
+
+        return {"message": "삭제 완료", "file_id": file_id, "deleted": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

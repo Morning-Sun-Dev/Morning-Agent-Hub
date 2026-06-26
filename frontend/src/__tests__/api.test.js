@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  deleteFile,
   getCapabilities,
   getFileDownloadAction,
   getFileInfo,
@@ -205,7 +206,7 @@ describe('api adapter', () => {
   })
 
   it('loads file list, metadata, and download actions', async () => {
-    const fetchMock = vi.fn(async (url) => {
+    const fetchMock = vi.fn(async (url, options = {}) => {
       if (url === '/api/files') {
         return new Response(JSON.stringify({
           files: [{
@@ -217,6 +218,12 @@ describe('api adapter', () => {
             download_url: 'https://drive.example/download/a',
           }],
           count: 1,
+        }), { status: 200 })
+      }
+      if (url === '/api/files/drive-file-1' && options.method === 'DELETE') {
+        return new Response(JSON.stringify({
+          file_id: 'drive-file-1',
+          deleted: true,
         }), { status: 200 })
       }
       if (url === '/api/files/drive-file-1') {
@@ -261,5 +268,10 @@ describe('api adapter', () => {
       url: 'https://drive.example/download/a',
       fallbackOpenUrl: null,
     })
+    await expect(deleteFile('drive-file-1')).resolves.toEqual({
+      file_id: 'drive-file-1',
+      deleted: true,
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/files/drive-file-1', { method: 'DELETE' })
   })
 })

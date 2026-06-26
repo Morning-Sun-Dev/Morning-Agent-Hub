@@ -142,6 +142,10 @@ export async function getFileDownloadAction(fileId) {
   }
 }
 
+export async function deleteFile(fileId) {
+  return parseJson(await fetch(`${BASE}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }))
+}
+
 export async function getCapabilities() {
   const payload = await parseJson(await fetch(`${BASE}/capabilities`))
   return (payload || []).map(normalizeCapability)

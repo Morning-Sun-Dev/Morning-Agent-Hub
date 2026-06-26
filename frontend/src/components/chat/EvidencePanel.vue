@@ -14,7 +14,13 @@ const props = defineProps({
   mobileCollapsed: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:activeTab', 'inspect-file', 'prepare-download'])
+const emit = defineEmits([
+  'update:activeTab',
+  'inspect-file',
+  'prepare-download',
+  'delete-file',
+  'select-capability',
+])
 const expanded = ref(false)
 const showMobileSummary = computed(() => props.mobileCollapsed && !expanded.value)
 const itemCount = computed(() => (
@@ -100,6 +106,7 @@ function statusLabel(status) {
             :file="file"
             @inspect="emit('inspect-file', $event)"
             @prepare-download="emit('prepare-download', $event)"
+            @delete="emit('delete-file', $event)"
           />
         </div>
 
@@ -133,6 +140,15 @@ function statusLabel(status) {
               <span :data-status="capability.uiStatus">{{ statusLabel(capability.uiStatus) }}</span>
               <small v-if="capability.uiSurface">{{ capability.uiSurface }}</small>
             </footer>
+            <button
+              type="button"
+              class="capability-action"
+              data-testid="capability-request-button"
+              :disabled="!capability.enabled"
+              @click="emit('select-capability', capability)"
+            >
+              요청 초안
+            </button>
           </article>
         </div>
       </div>
@@ -311,6 +327,24 @@ p {
 .capability-card footer span[data-status="partial"] {
   background: var(--m001-warning-soft);
   color: var(--m001-warning);
+}
+
+.capability-action {
+  justify-self: end;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--m001-border-strong);
+  border-radius: var(--m001-radius-control);
+  background: white;
+  color: var(--m001-text);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.capability-action:disabled {
+  color: var(--m001-muted);
+  cursor: not-allowed;
 }
 
 .capability-card small {

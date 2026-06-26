@@ -61,6 +61,7 @@ describe('EvidencePanel', () => {
         files: [{
           id: 'gdrive://file/a',
           fileId: 'drive-file-1',
+          kind: 'drive',
           name: 'brief.md',
           downloadUrl: 'https://drive.example/download/a',
         }],
@@ -71,8 +72,35 @@ describe('EvidencePanel', () => {
 
     await wrapper.get('[data-testid="file-info-button"]').trigger('click')
     await wrapper.get('[data-testid="file-download-button"]').trigger('click')
+    await wrapper.get('[data-testid="file-delete-button"]').trigger('click')
 
     expect(wrapper.emitted('inspect-file')).toEqual([['drive-file-1']])
     expect(wrapper.emitted('prepare-download')).toEqual([['drive-file-1']])
+    expect(wrapper.emitted('delete-file')).toEqual([['drive-file-1']])
+  })
+
+  it('emits capability quick actions from the capability panel', async () => {
+    const capability = {
+      agentId: 'file_management',
+      capabilityId: 'delete_file',
+      label: 'Drive 파일 삭제',
+      description: '파일을 휴지통으로 이동합니다.',
+      enabled: true,
+      uiStatus: 'available',
+      uiSurface: '파일 패널',
+    }
+    const wrapper = mount(EvidencePanel, {
+      props: {
+        sources: [],
+        files: [],
+        progress: [],
+        capabilities: [capability],
+        activeTab: 'capabilities',
+      },
+    })
+
+    await wrapper.get('[data-testid="capability-request-button"]').trigger('click')
+
+    expect(wrapper.emitted('select-capability')).toEqual([[capability]])
   })
 })
