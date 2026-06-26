@@ -218,3 +218,10 @@ def test_capability_registry_covers_every_shared_capability():
         and item.ui_surface == "파일 패널"
         for item in capabilities
     )
+    assert any(
+        item.capability_id == "url_fetch"
+        and item.ui_status == "partial"
+        and item.ui_surface == "기능 패널 요청 초안"
+        for item in capabilities
+    )
+    assert all(item.ui_status != "planned" for item in capabilities)
