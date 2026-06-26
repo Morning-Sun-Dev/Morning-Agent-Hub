@@ -1,4 +1,5 @@
 import pytest
+import json
 
 from common.schemas import AgentResponse
 from backend.api.contract_adapter import build_chat_response
@@ -268,6 +269,70 @@ def test_sse_answer_event_keeps_legacy_type_and_expanded_payload():
     assert payload["progress"][0]["label"] == "요청 분석"
     assert payload["artifacts"] == []
     assert payload["error"] == "일부 작업이 실패했습니다."
+
+
+def test_stream_route_includes_attachments_and_capabilities_in_prompt(monkeypatch):
+    from backend.api.routers import chat as chat_router
+    import asyncio
+
+    prompts = []
+
+    class FakeA2AClient:
+        async def send_message(self, agent_name, prompt):
+            assert agent_name == "orchestrator"
+            prompts.append(prompt)
+            return AgentResponse(
+                success=True,
+                artifacts=[{"name": "orchestrator_result", "text": "스트림 응답"}],
+            )
+
+    async def fake_ensure_session(session_id, message):
+        return session_id or "session_stream"
+
+    async def fake_load_history(session_id):
+        return ""
+
+    async def fake_save_message(session_id, role, content):
+        return None
+
+    async def fake_get_a2a_client():
+        return FakeA2AClient()
+
+    monkeypatch.setattr(chat_router, "_ensure_session", fake_ensure_session)
+    monkeypatch.setattr(chat_router, "_load_history", fake_load_history)
+    monkeypatch.setattr(chat_router, "_save_message", fake_save_message)
+    monkeypatch.setattr(chat_router, "get_a2a_client", fake_get_a2a_client)
+
+    async def collect_events():
+        response = await chat_router.chat_stream(
+            message="첨부 파일 요약",
+            attachments=json.dumps([
+                {
+                    "id": "gdrive://file/a",
+                    "name": "a.pdf",
+                    "kind": "uploaded",
+                    "status": "indexed",
+                    "storage_ref": "gdrive://file/a",
+                }
+            ]),
+            requested_capabilities=json.dumps(["web_search", "rag_vector_search"]),
+        )
+        return [chunk async for chunk in response.body_iterator]
+
+    events = asyncio.run(collect_events())
+
+    assert "[첨부 파일]" in prompts[0]
+    assert "gdrive://file/a" in prompts[0]
+    assert "[요청 기능]" in prompts[0]
+    assert "rag_vector_search" in prompts[0]
+    assert any("스트림 응답" in event for event in events)
+
+
+def test_stream_route_reports_invalid_json_list():
+    from backend.api.routers.chat import _json_list_param
+
+    with pytest.raises(ValueError, match="attachments"):
+        _json_list_param("{bad", "attachments")
 
 
 def test_build_chat_response_maps_agent_failure():
