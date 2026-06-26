@@ -414,7 +414,10 @@ class OrchestratorAgent:
             yield {
                 "is_task_complete": True,
                 "require_user_input": False,
-                "content": plan.direct_answer,
+                "content": (
+                    "[AI 직접 답변] 사내 문서를 참조하지 않은 답변입니다.\n\n"
+                    + plan.direct_answer
+                ),
                 "trace": trace,
             }
             return
@@ -480,16 +483,24 @@ class OrchestratorAgent:
                 None,
             )
             final_response = report_result.content if report_result else "보고서를 생성하지 못했습니다."
+
         elif last_result and last_result.agent == "internal_rag" and last_result.success \
                 and not self._is_rag_no_result(last_result.content):
-            # RAG 답변은 이미 문서 기반으로 생성됨 — generate_final_response()를 거치면
-            # gpt-4o가 학습 데이터로 재합성하여 환각이 발생하므로 직접 반환
-            final_response = last_result.content
+            # RAG 답변: 이미 문서 기반으로 생성됨 — 재합성 없이 직접 반환
+            # answer_from_documents()가 **출처:** 섹션을 이미 포함하므로 prefix만 추가
+            final_response = "[사내 문서 기반]\n\n" + last_result.content
+
         elif last_result and last_result.agent == "web_research" and last_result.success:
-            # 웹 폴백 결과도 재합성 없이 직접 반환
-            final_response = last_result.content or "웹에서도 관련 정보를 찾지 못했습니다."
+            # 웹 폴백 결과: 사내 문서 미발견 안내 + 웹 출처 명시
+            final_response = (
+                "[웹 검색 기반] 사내 문서에서 관련 내용을 찾지 못해 웹에서 검색했습니다.\n\n"
+                + (last_result.content or "웹에서도 관련 정보를 찾지 못했습니다.")
+            )
+
         else:
-            final_response = await self.generate_final_response(query, results)
+            # 그 외 멀티 에이전트 결과는 gpt-4o로 통합 요약
+            raw = await self.generate_final_response(query, results)
+            final_response = "💭 **[AI 통합 답변]**\n\n" + raw
 
         yield {
             "is_task_complete": True,
