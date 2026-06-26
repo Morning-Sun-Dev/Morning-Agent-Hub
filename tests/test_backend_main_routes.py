@@ -29,6 +29,29 @@ def test_backend_main_chat_openapi_uses_message_contract():
     assert "query" not in properties
 
 
+def test_backend_main_exposes_capability_registry():
+    response = TestClient(backend_main.app).get("/api/capabilities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    capability_ids = {item["capability_id"] for item in payload}
+
+    assert "web_search" in capability_ids
+    assert "delete_file" in capability_ids
+    assert any(
+        item["agent_id"] == "web_research"
+        and item["capability_id"] == "web_search"
+        and item["ui_status"] == "available"
+        for item in payload
+    )
+    assert any(
+        item["agent_id"] == "file_management"
+        and item["capability_id"] == "delete_file"
+        and item["ui_status"] == "planned"
+        for item in payload
+    )
+
+
 def test_backend_main_chat_post_dispatches_to_router_without_history(monkeypatch):
     from backend.api.routers import chat as chat_router
 

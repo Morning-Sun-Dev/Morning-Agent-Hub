@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { sendChat, streamChat, uploadFile } from '../api'
+import { getCapabilities, sendChat, streamChat, uploadFile } from '../api'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -131,5 +131,39 @@ describe('api adapter', () => {
     stop()
 
     expect(onDone).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads and normalizes capability descriptors', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify([
+          {
+            agent_id: 'web_research',
+            capability_id: 'web_search',
+            label: '웹 검색',
+            description: '최신 정보를 검색합니다.',
+            enabled: true,
+            ui_status: 'available',
+            ui_surface: '채팅 입력',
+          },
+        ]), { status: 200 }),
+      ),
+    )
+
+    const capabilities = await getCapabilities()
+
+    expect(fetch).toHaveBeenCalledWith('/api/capabilities')
+    expect(capabilities).toEqual([
+      {
+        agentId: 'web_research',
+        capabilityId: 'web_search',
+        label: '웹 검색',
+        description: '최신 정보를 검색합니다.',
+        enabled: true,
+        uiStatus: 'available',
+        uiSurface: '채팅 입력',
+      },
+    ])
   })
 })

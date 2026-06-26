@@ -125,6 +125,8 @@ cd ai_llm/orchestrator_agent && python agent_server.py      # :10010
 | `/api/sessions` | GET | 채팅 세션 목록 |
 | `/api/sessions/{id}/messages` | GET | 세션 대화 기록 |
 | `/api/files/upload` | POST | 파일 Drive 업로드 + RAG 인덱싱 |
+| `/api/capabilities` | GET | 에이전트 기능 및 UI 지원 상태 목록 |
+| `/api/report-templates` | GET | 보고서 양식 목록 |
 | `/docs` | GET | Swagger UI |
 
 **POST /api/chat 예시:**

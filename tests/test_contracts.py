@@ -1,5 +1,6 @@
 from common.contracts import (
     ArtifactEnvelope,
+    CapabilityId,
     ChatResponseContract,
     FileArtifactContract,
     PlanStepContract,
@@ -177,3 +178,29 @@ def test_contract_aliases_are_exported_from_common_package():
 
     assert hasattr(common, "AgentId")
     assert hasattr(common, "RunEventContract")
+
+
+def test_capability_registry_covers_every_shared_capability():
+    from typing import get_args
+
+    from common.capabilities import list_capabilities
+
+    capabilities = list_capabilities()
+    capability_ids = {item.capability_id for item in capabilities}
+
+    assert capability_ids == set(get_args(CapabilityId))
+    assert {item.agent_id for item in capabilities} == {
+        "orchestrator",
+        "web_research",
+        "internal_rag",
+        "file_management",
+        "report_writing",
+    }
+    assert any(
+        item.capability_id == "web_search" and item.ui_status == "available"
+        for item in capabilities
+    )
+    assert any(
+        item.capability_id == "delete_file" and item.ui_status == "planned"
+        for item in capabilities
+    )

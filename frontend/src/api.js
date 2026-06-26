@@ -1,6 +1,7 @@
 import {
   createAttachment,
   createMessage,
+  normalizeCapability,
   normalizeChatPayload,
   normalizeFileArtifact,
   normalizeProgress,
@@ -121,4 +122,9 @@ export async function uploadFile(file) {
 export async function listFiles() {
   const payload = await parseJson(await fetch(`${BASE}/files`))
   return (payload.files || []).map(normalizeFileArtifact)
+}
+
+export async function getCapabilities() {
+  const payload = await parseJson(await fetch(`${BASE}/capabilities`))
+  return (payload || []).map(normalizeCapability)
 }

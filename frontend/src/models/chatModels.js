@@ -97,6 +97,18 @@ export function normalizeChatPayload(payload = {}) {
   }
 }
 
+export function normalizeCapability(capability = {}) {
+  return {
+    agentId: capability.agent_id || capability.agentId || 'orchestrator',
+    capabilityId: capability.capability_id || capability.capabilityId || 'route_request',
+    label: capability.label || capability.capability_id || capability.capabilityId || '기능',
+    description: capability.description || '',
+    enabled: capability.enabled !== false,
+    uiStatus: capability.ui_status || capability.uiStatus || 'planned',
+    uiSurface: capability.ui_surface || capability.uiSurface || '',
+  }
+}
+
 export function serializeAttachment(attachment = {}) {
   return {
     id: attachment.storageRef || attachment.storage_ref || attachment.id || fallbackId('file'),

@@ -28,6 +28,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from a2a.client import A2ACardResolver
+from common.capabilities import list_capabilities
+from common.contracts import CapabilityDescriptor
 
 load_dotenv()
 
@@ -147,6 +149,12 @@ async def list_report_templates():
     return list_templates()
 
 
+@app.get("/api/capabilities", response_model=list[CapabilityDescriptor])
+async def capabilities():
+    """에이전트 기능과 현재 UI 지원 상태 목록"""
+    return list_capabilities()
+
+
 @app.get("/")
 async def root():
     return {
@@ -161,6 +169,7 @@ async def root():
             "files_upload": "POST /api/files/upload",
             "files_list": "GET /api/files",
             "report_templates": "GET /api/report-templates",
+            "capabilities": "GET /api/capabilities",
         },
     }
 
