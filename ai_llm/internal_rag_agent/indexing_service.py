@@ -68,16 +68,16 @@ class IndexJob:
 
 def chunk_documents(
     text: str,
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int = 800,
+    chunk_overlap: int = 150,
 ) -> List[str]:
     """
     텍스트를 청크로 분할
 
     Args:
         text: 원본 텍스트
-        chunk_size: 청크 크기 (문자 수, 기본 500)
-        chunk_overlap: 청크 간 겹침 (기본 50)
+        chunk_size: 청크 크기 (문자 수, 기본 800)
+        chunk_overlap: 청크 간 겹침 (기본 150)
 
     Returns:
         청크 문자열 리스트
@@ -189,6 +189,7 @@ def index_document(
         chunks = chunk_documents(parsed.text, chunk_size, chunk_overlap)
         embeddings_list = embed_chunks(chunks)
 
+        rows: List[Dict[str, Any]] = []
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings_list)):
             row: Dict[str, Any] = {
                 "content": chunk,
@@ -199,8 +200,9 @@ def index_document(
             }
             if parsed.document_type:
                 row["document_type"] = parsed.document_type
+            rows.append(row)
 
-            sb.table("documents").insert(row).execute()
+        sb.table("documents").insert(rows).execute()
 
         logger.info(f"[INDEXING] 인덱싱 완료: {filename}, {len(chunks)}개 청크")
         return IndexJob(

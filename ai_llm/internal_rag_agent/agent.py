@@ -357,7 +357,7 @@ def search_router(state: RAGState) -> RAGState:
 def vector_search(state: RAGState) -> RAGState:
     """벡터 유사도 검색 — M-007 search_documents() 위임"""
     logger.info("[RAG AGENT] [VECTOR SEARCH] 시작")
-    results, sources = search_documents(state["question"], get_supabase())
+    results, sources = search_documents(state["question"], get_supabase_service())
     return {"search_results": results, "sources": [s.to_dict() for s in sources]}
 
 
@@ -366,7 +366,7 @@ def sql_search(state: RAGState) -> RAGState:
     logger.info("[RAG AGENT] [SQL SEARCH] 시작")
     filters = extract_sql_filters(state["question"])
     logger.info(f"[RAG AGENT] [SQL SEARCH] 추출된 조건: {filters}")
-    results, sources = search_documents_by_metadata(get_supabase(), filters)
+    results, sources = search_documents_by_metadata(get_supabase_service(), filters)
     return {"search_results": results, "sources": [s.to_dict() for s in sources]}
 
 
@@ -380,7 +380,13 @@ def generate(state: RAGState) -> RAGState:
     sources = [Source(**s) for s in raw_sources]  # dict → Source 객체
 
     if not search_results:
-        return {"answer": "관련 문서를 찾을 수 없습니다. 다른 검색어로 시도해주세요.", "sources": raw_sources}
+        return {
+            "answer": (
+                "현재 인덱싱된 문서에서 관련 내용을 찾지 못했습니다. "
+                "문서가 인덱싱되어 있는지 확인하거나, 다른 표현으로 질문해 보세요."
+            ),
+            "sources": raw_sources,
+        }
 
     if search_type == "sql":
         answer = build_list_response(search_results, sources)      # M-007
