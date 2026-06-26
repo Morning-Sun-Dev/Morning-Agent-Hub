@@ -3,7 +3,7 @@ import logging
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
-from a2a.types import TaskState, Part, TextPart
+from a2a.types import TaskState, Part, TextPart, DataPart
 from a2a.utils import new_agent_text_message, new_task
 try:
     from .agent import OrchestratorAgent
@@ -11,6 +11,24 @@ except ImportError:
     from agent import OrchestratorAgent
 
 logger = logging.getLogger(__name__)
+
+
+def build_child_artifact_payloads(artifacts: list[dict]) -> list[tuple[str, list[Part]]]:
+    """Convert child agent artifact dictionaries into A2A DataPart payloads."""
+    payloads = []
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        name = artifact.get("name") or "child_artifact"
+        parts = []
+        if artifact.get("text") is not None:
+            parts.append(Part(root=TextPart(text=str(artifact["text"]))))
+        if isinstance(artifact.get("data"), dict):
+            parts.append(Part(root=DataPart(data=artifact["data"])))
+        if not parts:
+            parts.append(Part(root=DataPart(data=artifact)))
+        payloads.append((name, parts))
+    return payloads
 
 
 class OrchestratorAgentExecutor(AgentExecutor):
@@ -90,6 +108,8 @@ class OrchestratorAgentExecutor(AgentExecutor):
                             parts=[Part(root=TextPart(text=trace_json))],
                             name="execution_trace",
                         )
+                    for artifact_name, parts in build_child_artifact_payloads(artifacts):
+                        await updater.add_artifact(parts=parts, name=artifact_name)
                     await updater.complete()
                     break
 

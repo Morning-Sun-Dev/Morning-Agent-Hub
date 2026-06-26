@@ -13,8 +13,7 @@ import sys
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from uuid import uuid4
+from typing import List, Optional
 
 # uvicorn --reload 가 subprocess를 spawn할 때 sys.path가 달라지는 문제 방지
 # 항상 project root를 sys.path 맨 앞에 보장
@@ -24,12 +23,11 @@ if _PROJECT_ROOT not in sys.path:
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from a2a.client import A2AClient, A2ACardResolver
-from a2a.types import Message, MessageSendParams, SendMessageRequest, TextPart
+from a2a.client import A2ACardResolver
 
 load_dotenv()
 
@@ -48,17 +46,6 @@ AGENT_HEALTH_URLS = {
     "file_management": os.getenv("FILE_AGENT_URL", "http://localhost:10013"),
     "report_writing": os.getenv("REPORT_AGENT_URL", "http://localhost:10014"),
 }
-
-
-class ChatRequest(BaseModel):
-    query: str = Field(..., description="사용자 질문 또는 작업 요청")
-    session_id: str = Field(default="default", description="세션 ID")
-
-
-class ChatResponse(BaseModel):
-    success: bool
-    response: str
-    session_id: str
 
 
 class AgentStatus(BaseModel):
@@ -82,65 +69,15 @@ class ReportTemplateInfo(BaseModel):
     section_count: int
 
 
-_a2a_client: Optional[A2AClient] = None
-_httpx_client: Optional[httpx.AsyncClient] = None
-
-
-async def get_a2a_client() -> A2AClient:
-    global _a2a_client, _httpx_client
-
-    if _a2a_client is None:
-        _httpx_client = httpx.AsyncClient(timeout=600.0)
-        card_resolver = A2ACardResolver(
-            httpx_client=_httpx_client,
-            base_url=ORCHESTRATOR_URL,
-        )
-        agent_card = await card_resolver.get_agent_card()
-        _a2a_client = A2AClient(
-            httpx_client=_httpx_client,
-            agent_card=agent_card,
-        )
-        logger.info(f"[BACKEND] 오케스트레이터 연결: {agent_card.name}")
-
-    return _a2a_client
-
-
-def extract_response_text(result: Any) -> str:
-    """A2A Task 결과에서 텍스트 추출"""
-    if not result:
-        return ""
-
-    if hasattr(result, "artifacts") and result.artifacts:
-        for artifact in result.artifacts:
-            if artifact.parts:
-                for part in artifact.parts:
-                    if hasattr(part, "root") and hasattr(part.root, "text"):
-                        return part.root.text
-
-    if hasattr(result, "history") and result.history:
-        for msg in reversed(result.history):
-            if hasattr(msg, "role") and "agent" in str(msg.role):
-                for part in msg.parts:
-                    if hasattr(part, "root") and hasattr(part.root, "text"):
-                        return part.root.text
-
-    return ""
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        await get_a2a_client()
-    except Exception as e:
-        logger.warning(f"[BACKEND] 오케스트레이터 초기 연결 실패 (시작 후 재시도 가능): {e}")
+    logger.info("[BACKEND] FastAPI 게이트웨이 시작")
     yield
-    global _httpx_client
-    if _httpx_client:
-        await _httpx_client.aclose()
     # 채팅 라우터 A2A 클라이언트 종료
     from backend.api.routers.chat import _a2a_client as _chat_a2a
     if _chat_a2a:
         await _chat_a2a.close()
+    logger.info("[BACKEND] FastAPI 게이트웨이 종료")
 
 
 app = FastAPI(
@@ -194,53 +131,6 @@ async def health_check():
         orchestrator_url=ORCHESTRATOR_URL,
         agents=agents,
     )
-
-
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """오케스트레이터에 질문을 전달하고 응답을 받습니다"""
-    try:
-        client = await get_a2a_client()
-    except Exception as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"오케스트레이터에 연결할 수 없습니다: {e}. "
-                   f"에이전트 서버가 실행 중인지 확인하세요 ({ORCHESTRATOR_URL})",
-        )
-
-    message = Message(
-        kind="message",
-        role="user",
-        parts=[TextPart(kind="text", text=request.query)],
-        message_id=uuid4().hex,
-    )
-
-    a2a_request = SendMessageRequest(
-        id=uuid4().hex,
-        params=MessageSendParams(message=message),
-    )
-
-    try:
-        response = await client.send_message(a2a_request)
-        result = response.root.result if hasattr(response, "root") else response.result
-        response_text = extract_response_text(result)
-
-        if not response_text:
-            return ChatResponse(
-                success=False,
-                response="응답을 받지 못했습니다.",
-                session_id=request.session_id,
-            )
-
-        return ChatResponse(
-            success=True,
-            response=response_text,
-            session_id=request.session_id,
-        )
-
-    except Exception as e:
-        logger.error(f"[BACKEND] A2A 호출 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"에이전트 호출 실패: {str(e)}")
 
 
 @app.get("/api/report-templates", response_model=List[ReportTemplateInfo])

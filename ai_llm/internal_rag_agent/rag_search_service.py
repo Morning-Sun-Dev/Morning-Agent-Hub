@@ -9,7 +9,8 @@ M-007 RAG Search Service
 
 import json
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -40,6 +41,7 @@ class Source:
         url: Google Drive 웹 URL
         document_type: 파일 형식
         created_at: 인덱싱 일시
+        pages: 청크에서 추출한 페이지 번호 목록 (예: [13, 14])
     """
     filename: str
     storage_ref: str
@@ -48,6 +50,7 @@ class Source:
     url: Optional[str] = None
     document_type: Optional[str] = None
     created_at: Optional[str] = None
+    pages: List[int] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -58,6 +61,7 @@ class Source:
             "url": self.url,
             "document_type": self.document_type,
             "created_at": self.created_at,
+            "pages": self.pages,
         }
 
 
@@ -77,17 +81,45 @@ def _storage_ref_to_url(storage_ref: str) -> Optional[str]:
     return f"https://drive.google.com/file/d/{file_id}/view" if file_id else None
 
 
+def _extract_pages(content: str) -> List[int]:
+    """
+    청크 텍스트에서 페이지 번호 추출
+
+    인덱싱 시 삽입된 '[페이지 N]' 마커를 파싱하여 페이지 번호 목록 반환.
+    예: '[페이지 13]\n...[페이지 14]\n...' → [13, 14]
+    """
+    matches = re.findall(r'\[페이지\s+(\d+)\]', content)
+    return sorted({int(m) for m in matches})
+
+
 def _build_source_section(sources: List[Source]) -> str:
-    """출처 섹션 텍스트 생성 (F-010)"""
-    seen: set = set()
-    lines = ["\n\n**출처:**"]
+    """
+    출처 섹션 텍스트 생성 (F-010)
+
+    파일명, 페이지 번호, Drive URL을 포함한 출처 정보를 마크다운으로 반환.
+    동일 파일의 여러 청크는 페이지 번호를 합산하여 하나로 묶어 표시.
+    """
+    # 파일명 기준으로 페이지 번호 집계
+    file_pages: Dict[str, List[int]] = {}
+    file_meta: Dict[str, Source] = {}
     for s in sources:
-        if s.filename and s.filename not in seen:
-            line = f"- {s.filename}"
-            if s.url:
-                line += f"\n  파일 위치: {s.url}"
-            lines.append(line)
-            seen.add(s.filename)
+        if not s.filename:
+            continue
+        if s.filename not in file_pages:
+            file_pages[s.filename] = []
+            file_meta[s.filename] = s
+        file_pages[s.filename].extend(s.pages)
+
+    lines = ["\n\n**출처:**"]
+    for filename, meta in file_meta.items():
+        pages = sorted(set(file_pages[filename]))
+        page_str = f"p.{pages[0]}" if len(pages) == 1 else f"p.{pages[0]}–{pages[-1]}" if pages else ""
+        line = f"- **{filename}**"
+        if page_str:
+            line += f" ({page_str})"
+        if meta.url:
+            line += f"\n  파일 위치: {meta.url}"
+        lines.append(line)
     return "\n".join(lines)
 
 
@@ -99,10 +131,11 @@ def search_documents(
     query: str,
     sb: Client,
     filters: Optional[Dict[str, Any]] = None,
-    match_count: int = 5,
+    match_count: int = 10,
+    match_threshold: float = 0.3,
 ) -> Tuple[List[Dict[str, Any]], List[Source]]:
     """
-    벡터 유사도 기반 문서 검색
+    벡터 유사도 기반 문서 검색 — 쿼리 재작성 + 멀티 쿼리 + 중복 제거
 
     M-007 RAG Search Service 핵심 인터페이스
 
@@ -110,26 +143,40 @@ def search_documents(
         query: 자연어 검색 질의
         sb: Supabase 클라이언트
         filters: 추가 후처리 필터 (document_type, filename_contains)
-        match_count: 반환할 최대 결과 수 (기본 5)
+        match_count: 최종 반환할 최대 결과 수 (기본 10)
+        match_threshold: 유사도 최소값 (기본 0.3)
 
     Returns:
         (raw_results, sources)
     """
     logger.info(f"[RAG SEARCH] 벡터 검색 시작: {query[:50]}...")
 
-    query_embedding = _embeddings.embed_query(query)
+    # 1. 쿼리 재작성 + 멀티 쿼리 생성
+    rewritten = rewrite_query(query)
+    extra_queries = generate_multi_queries(rewritten)
+    all_queries = [rewritten] + extra_queries
 
-    try:
-        response = sb.rpc("match_documents", {
-            "query_embedding": query_embedding,
-            "match_count": match_count,
-        }).execute()
-        results: List[Dict] = response.data or []
-    except Exception as e:
-        logger.error(f"[RAG SEARCH] 벡터 검색 오류: {e}")
-        results = []
+    # 2. 각 쿼리 순차 실행 — storage_ref:chunk_index 키로 중복 제거 (높은 유사도 우선)
+    seen: Dict[str, Dict] = {}
+    for q in all_queries:
+        q_embedding = _embeddings.embed_query(q)
+        try:
+            response = sb.rpc("match_documents", {
+                "query_embedding": q_embedding,
+                "match_count": match_count,
+                "match_threshold": match_threshold,
+            }).execute()
+            for r in (response.data or []):
+                key = f"{r.get('storage_ref')}:{r.get('chunk_index')}"
+                if key not in seen or r.get("similarity", 0) > seen[key].get("similarity", 0):
+                    seen[key] = r
+        except Exception as e:
+            logger.error(f"[RAG SEARCH] 쿼리 검색 오류 ({q[:30]}): {e}")
 
-    # 후처리 필터
+    # 3. 유사도 내림차순 정렬, 상위 match_count개
+    results: List[Dict] = sorted(seen.values(), key=lambda r: r.get("similarity", 0), reverse=True)[:match_count]
+
+    # 4. 후처리 필터
     if filters and results:
         doc_type = filters.get("document_type")
         kw = (filters.get("filename_contains") or "").lower()
@@ -146,12 +193,59 @@ def search_documents(
             similarity=r.get("similarity", 0.0),
             url=_storage_ref_to_url(r.get("storage_ref", "")),
             document_type=r.get("document_type"),
+            pages=_extract_pages(r.get("content", "")),
         )
         for r in results
     ]
 
-    logger.info(f"[RAG SEARCH] 벡터 검색 결과: {len(results)}개")
+    logger.info(f"[RAG SEARCH] 최종 검색 결과: {len(results)}개 (쿼리 {len(all_queries)}개 사용)")
     return results, sources
+
+
+def rewrite_query(question: str) -> str:
+    """사용자 질문을 검색 최적화 쿼리로 재작성 (gpt-4o-mini). 실패 시 원본 반환."""
+    try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "사용자 질문을 문서 검색에 최적화된 한국어 키워드 중심 문장으로 재작성하세요. "
+                    "구어체 표현을 제거하고 핵심 명사와 동사만 남기세요. "
+                    "재작성된 문장만 출력하세요."
+                ),
+            },
+            {"role": "user", "content": question},
+        ]
+        response = _llm.invoke(messages)
+        rewritten = response.content.strip()
+        logger.info(f"[RAG SEARCH] 쿼리 재작성: '{question[:30]}' → '{rewritten[:50]}'")
+        return rewritten
+    except Exception as e:
+        logger.warning(f"[RAG SEARCH] 쿼리 재작성 실패, 원본 사용: {e}")
+        return question
+
+
+def generate_multi_queries(rewritten_query: str) -> List[str]:
+    """재작성된 쿼리에서 표현을 달리한 3개 변형 쿼리 생성. 실패 시 빈 리스트 반환."""
+    try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "주어진 검색 쿼리를 의미는 같지만 표현을 달리한 3개의 한국어 쿼리로 변환하세요. "
+                    "각 쿼리는 줄바꿈으로 구분하고, 번호나 불릿 없이 쿼리만 출력하세요."
+                ),
+            },
+            {"role": "user", "content": rewritten_query},
+        ]
+        response = _llm.invoke(messages)
+        lines = [line.strip() for line in response.content.strip().splitlines() if line.strip()]
+        queries = lines[:3]
+        logger.info(f"[RAG SEARCH] 멀티 쿼리 생성: {len(queries)}개")
+        return queries
+    except Exception as e:
+        logger.warning(f"[RAG SEARCH] 멀티 쿼리 생성 실패: {e}")
+        return []
 
 
 def extract_sql_filters(question: str) -> Dict[str, Any]:
@@ -291,8 +385,10 @@ def answer_from_documents(
 {query}
 
 ## 지시사항
-- 문서에 있는 정보만 사용하세요
-- 출처 문서명을 명시하세요
+- 반드시 참고 문서에 있는 정보만 사용하세요. 학습 데이터나 일반 지식을 사용하지 마세요.
+- 문서에 등급·단계·항목 번호가 있다면 해당 번호와 명칭을 그대로 인용하세요.
+- 목록, 표, 조건 등 구조화된 정보는 원문의 구조를 유지하여 답변하세요.
+- 문서에서 답을 찾을 수 없는 경우 "문서에서 관련 내용을 찾지 못했습니다."라고 답하세요.
 """,
         }
     ]

@@ -7,10 +7,12 @@ from typing import AsyncIterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from common.a2a_client import A2AClientWrapper
+from backend.api.contract_adapter import build_chat_response
 from backend.api.db import get_supabase_service as get_supabase
 from backend.api.schemas import ChatRequest, ChatResponse
 
@@ -83,13 +85,68 @@ async def _save_message(session_id, role, content):
     await asyncio.to_thread(_save_message_sync, session_id, role, content)
 
 
+def _build_prompt(req: ChatRequest, history: str) -> str:
+    sections = []
+    if history:
+        sections.append(f"[이전 대화]\n{history}")
+    sections.append(f"[현재 질문]\n{req.message}")
+
+    if req.attachments:
+        attachment_lines = []
+        for attachment in req.attachments:
+            attachment_lines.append(
+                f"- {attachment.name}"
+                f" | status={attachment.status}"
+                f" | storage_ref={attachment.storage_ref or attachment.id}"
+            )
+        sections.append("[첨부 파일]\n" + "\n".join(attachment_lines))
+
+    if req.requested_capabilities:
+        sections.append("[요청 기능]\n" + ", ".join(req.requested_capabilities))
+
+    return "\n\n".join(sections)
+
+
+def _sse_data(payload: dict) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _json_list_param(value: str | None, field_name: str) -> list:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field_name} 파라미터가 JSON 배열이 아닙니다.") from exc
+    if not isinstance(parsed, list):
+        raise ValueError(f"{field_name} 파라미터는 JSON 배열이어야 합니다.")
+    return parsed
+
+
+def _answer_event_payload(chat_response: ChatResponse, session_id: str) -> dict:
+    return {
+        "type": "answer",
+        "content": chat_response.answer,
+        "session_id": session_id,
+        "run_id": chat_response.run_id,
+        "status": chat_response.status,
+        "sources": [source.model_dump() for source in chat_response.sources],
+        "files": [file.model_dump() for file in chat_response.files],
+        "progress": [item.model_dump() for item in chat_response.progress],
+        "artifacts": [artifact.model_dump() for artifact in chat_response.artifacts],
+        "error": chat_response.error,
+    }
+
+
 # ── 엔드포인트 ─────────────────────────────────────
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     session_id = await _ensure_session(req.session_id, req.message)
-    history = await _load_history(session_id)
-    prompt = f"[이전 대화]\n{history}\n\n[현재 질문]\n{req.message}" if history else req.message
+    # Keep prior chat history out of the orchestrator prompt so RAG queries stay
+    # focused on the current request, while still preserving explicit contract
+    # fields such as attachments and requested capabilities.
+    prompt = _build_prompt(req, "")
 
     await _save_message(session_id, "user", req.message)
 
@@ -97,13 +154,15 @@ async def chat(req: ChatRequest):
         client = await get_a2a_client()
         response = await client.send_message("orchestrator", prompt)
 
+        chat_response = build_chat_response(response, session_id=session_id)
+
         if not response.success:
-            raise HTTPException(status_code=500, detail=response.error)
+            raise HTTPException(status_code=500, detail=chat_response.error)
 
-        answer = response.artifacts[0].get("text", "") if response.artifacts else ""
-        await _save_message(session_id, "assistant", answer)
+        if chat_response.answer:
+            await _save_message(session_id, "assistant", chat_response.answer)
 
-        return ChatResponse(answer=answer, session_id=session_id)
+        return chat_response
 
     except HTTPException:
         raise
@@ -112,35 +171,58 @@ async def chat(req: ChatRequest):
 
 
 @router.get("/chat/stream")
-async def chat_stream(message: str, session_id: str | None = None):
+async def chat_stream(
+    message: str,
+    session_id: str | None = None,
+    attachments: str | None = None,
+    requested_capabilities: str | None = None,
+):
     """SSE 스트리밍"""
 
     async def generate() -> AsyncIterator[str]:
         try:
             # Supabase 작업을 스레드에서 실행
             resolved_id = await _ensure_session(session_id, message)
-            history = await _load_history(resolved_id)
-            prompt = f"[이전 대화]\n{history}\n\n[현재 질문]\n{message}" if history else message
+            req = ChatRequest(
+                message=message,
+                session_id=resolved_id,
+                attachments=_json_list_param(attachments, "attachments"),
+                requested_capabilities=_json_list_param(
+                    requested_capabilities,
+                    "requested_capabilities",
+                ),
+            )
+            # Keep chat history out of the orchestrator prompt, but retain
+            # explicit stream request metadata from the frontend contract.
+            prompt = _build_prompt(req, "")
 
             await _save_message(resolved_id, "user", message)
 
-            yield f"data: {json.dumps({'type': 'status', 'state': 'working'})}\n\n"
+            yield _sse_data({"type": "status", "state": "working"})
 
             client = await get_a2a_client()
             response = await client.send_message("orchestrator", prompt)
 
+            chat_response = build_chat_response(response, session_id=resolved_id)
+
             if not response.success:
-                yield f"data: {json.dumps({'type': 'error', 'content': response.error})}\n\n"
+                yield _sse_data({
+                    "type": "error",
+                    "content": chat_response.error,
+                    "run_id": chat_response.run_id,
+                })
                 yield "data: [DONE]\n\n"
                 return
 
-            answer = response.artifacts[0].get("text", "") if response.artifacts else ""
-            await _save_message(resolved_id, "assistant", answer)
+            if chat_response.answer:
+                await _save_message(resolved_id, "assistant", chat_response.answer)
 
-            yield f"data: {json.dumps({'type': 'answer', 'content': answer, 'session_id': resolved_id})}\n\n"
+            yield _sse_data(_answer_event_payload(chat_response, resolved_id))
 
+        except (ValueError, ValidationError) as e:
+            yield _sse_data({"type": "error", "content": str(e)})
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            yield _sse_data({"type": "error", "content": str(e)})
 
         yield "data: [DONE]\n\n"
 
