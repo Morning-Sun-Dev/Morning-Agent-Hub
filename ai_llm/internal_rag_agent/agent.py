@@ -357,7 +357,7 @@ def search_router(state: RAGState) -> RAGState:
 def vector_search(state: RAGState) -> RAGState:
     """벡터 유사도 검색 — M-007 search_documents() 위임"""
     logger.info("[RAG AGENT] [VECTOR SEARCH] 시작")
-    results, sources = search_documents(state["question"], get_supabase())
+    results, sources = search_documents(state["question"], get_supabase_service())
     return {"search_results": results, "sources": [s.to_dict() for s in sources]}
 
 
@@ -366,7 +366,7 @@ def sql_search(state: RAGState) -> RAGState:
     logger.info("[RAG AGENT] [SQL SEARCH] 시작")
     filters = extract_sql_filters(state["question"])
     logger.info(f"[RAG AGENT] [SQL SEARCH] 추출된 조건: {filters}")
-    results, sources = search_documents_by_metadata(get_supabase(), filters)
+    results, sources = search_documents_by_metadata(get_supabase_service(), filters)
     return {"search_results": results, "sources": [s.to_dict() for s in sources]}
 
 
