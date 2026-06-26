@@ -1,10 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getCapabilities, streamChat, uploadFile } from '../../../api'
+import { getCapabilities, getReportTemplates, streamChat, uploadFile } from '../../../api'
 import ChatShell from '../ChatShell.vue'
 
 vi.mock('../../../api', () => ({
   getCapabilities: vi.fn(),
+  getReportTemplates: vi.fn(),
   uploadFile: vi.fn(),
   streamChat: vi.fn(),
 }))
@@ -30,6 +31,14 @@ describe('ChatShell', () => {
         enabled: true,
         uiStatus: 'planned',
         uiSurface: '',
+      },
+    ])
+    getReportTemplates.mockResolvedValue([
+      {
+        id: 'research_report',
+        name: 'Research Report',
+        description: '조사 보고서',
+        sectionCount: 5,
       },
     ])
     streamChat.mockImplementation((_message, _sessionId, handlers) => {
@@ -157,5 +166,24 @@ describe('ChatShell', () => {
     const options = streamChat.mock.calls.at(-1)[3]
     expect(options.requestedCapabilities).not.toContain('web_search')
     expect(options.requestedCapabilities).toEqual(expect.arrayContaining(['rag_vector_search']))
+  })
+
+  it('sends selected report template instructions and capabilities', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="report-template-select"]').setValue('research_report')
+    await wrapper.get('textarea').setValue('시장 동향 정리해줘')
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+
+    const [message, , , options] = streamChat.mock.calls.at(-1)
+    expect(message).toContain('시장 동향 정리해줘')
+    expect(message).toContain('template_id: research_report')
+    expect(message).toContain('template_name: Research Report')
+    expect(options.requestedCapabilities).toEqual(expect.arrayContaining([
+      'write_report',
+      'format_report',
+      'list_templates',
+    ]))
   })
 })

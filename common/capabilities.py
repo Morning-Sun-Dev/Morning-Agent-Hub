@@ -138,7 +138,8 @@ _CAPABILITIES = [
         capability_id="list_templates",
         label="보고서 양식 조회",
         description="사용 가능한 보고서 템플릿 목록과 구조를 조회합니다.",
-        ui_status="planned",
+        ui_status="partial",
+        ui_surface="채팅 입력",
     ),
 ]
 
