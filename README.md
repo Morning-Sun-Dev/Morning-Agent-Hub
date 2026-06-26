@@ -90,7 +90,7 @@ python start_agents.py --agent report   # 특정 에이전트만
 ### FastAPI 백엔드
 
 ```bash
-python -m backend.api.main
+python -m backend.main
 ```
 
 기본 포트: **8000** · Swagger: http://localhost:8000/docs
@@ -115,7 +115,7 @@ cd ai_llm/report_writing_agent && python agent_server.py    # :10014
 cd ai_llm/orchestrator_agent && python agent_server.py      # :10010
 ```
 
-## FastAPI API (`backend.api.main`)
+## FastAPI API (`backend.main`)
 
 | 엔드포인트 | 메서드 | 설명 |
 |-----------|--------|------|
@@ -176,7 +176,7 @@ Morning-Agent-Hub/
 ├── stop_agents.py
 ├── test_client.py              # A2A CLI 테스트
 ├── backend/
-│   ├── main.py                 # (레거시) 이전 FastAPI 게이트웨이 — 사용하지 않음
+│   ├── main.py                 # 통합 FastAPI 게이트웨이
 │   └── api/                    # 현재 REST API (main.py)
 │       ├── main.py
 │       └── routers/            # chat, sessions, files
