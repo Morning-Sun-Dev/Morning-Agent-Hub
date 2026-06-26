@@ -2,12 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createMessage, createProgress } from '../../models/chatModels'
 import {
+  createFolder,
+  deleteFile,
+  findFolders,
   getCapabilities,
   getFileDownloadAction,
   getFileInfo,
   getReportTemplates,
   listFiles,
   streamChat,
+  updateFileName,
   uploadFile,
 } from '../../api'
 import ChatHeader from './ChatHeader.vue'
@@ -25,15 +29,39 @@ const progress = ref([])
 const sources = ref([])
 const generatedFiles = ref([])
 const driveFiles = ref([])
+const folders = ref([])
 const capabilities = ref([])
 const reportTemplates = ref([])
 const selectedTemplateId = ref('')
+const selectedCapabilityIds = ref([])
 const fileNotice = ref('')
+const folderNotice = ref('')
 const error = ref(null)
 const sessionId = ref(null)
 const lastRequest = ref(null)
 
 let stopStream = null
+
+const capabilityPromptMap = {
+  route_request: '이 요청을 적절한 에이전트 실행 계획으로 분해해줘.',
+  web_search: '이 주제의 최신 정보를 출처와 함께 검색해줘.',
+  news_search: '이 주제의 최신 뉴스와 핵심 변화를 출처와 함께 요약해줘.',
+  url_fetch: '다음 URL 내용을 가져와 핵심 내용을 요약해줘:\nhttps://',
+  rag_vector_search: '사내 문서에서 이 주제와 관련된 근거를 찾아 답변해줘.',
+  rag_sql_search: '문서 유형, 날짜, 작성자 같은 메타데이터 조건으로 관련 문서를 찾아줘.',
+  rag_index: '선택한 Drive 파일을 인덱싱하고 검색 가능 상태로 만들어줘.',
+  upload_file: '이 내용을 Google Drive 파일로 저장해줘.',
+  download_file: 'Drive 파일을 다운로드 가능한 링크로 준비해줘.\n파일 ID 또는 gdrive://file/: ',
+  get_file_info: 'Drive 파일의 이름, 크기, 형식, 수정일 정보를 확인해줘.\n파일 ID 또는 gdrive://file/: ',
+  find_folder: 'Google Drive에서 다음 폴더를 찾아줘:\n폴더명: ',
+  list_files: 'Google Drive 파일 목록을 보여줘.',
+  delete_file: '다음 Drive 파일을 휴지통으로 이동해줘.\n파일 ID 또는 gdrive://file/: ',
+  update_file: '다음 Drive 파일의 이름이나 내용을 업데이트해줘.\n파일 ID 또는 gdrive://file/: ',
+  create_folder: 'Google Drive에 새 폴더를 만들어줘.\n폴더명: ',
+  write_report: '수집한 정보를 Markdown 보고서로 작성해줘.',
+  format_report: '다음 내용을 선택한 보고서 양식에 맞춰 정리해줘.',
+  list_templates: '사용 가능한 보고서 양식 목록과 각 용도를 알려줘.',
+}
 
 const runningMessage = computed(() => {
   if (runState.value !== 'running') return null
@@ -60,6 +88,42 @@ function applyPrompt(prompt) {
   draft.value = prompt
 }
 
+function applyCapability(capability) {
+  const capabilityId = capability?.capabilityId
+  if (!capabilityId) return
+
+  selectedCapabilityIds.value = [capabilityId]
+  draft.value = capabilityPromptMap[capabilityId] || `${capability.label || '선택한 기능'}을 사용해줘.`
+  activePanel.value = 'capabilities'
+}
+
+function runPanelCapability(payload = {}) {
+  const capabilityId = payload.capabilityId
+  const value = typeof payload.value === 'string' ? payload.value.trim() : ''
+  if (!capabilityId || !value || isBusy()) return
+
+  const text = capabilityRequestText(capabilityId, value)
+  if (!text) return
+
+  dispatchRequest({
+    text,
+    displayText: text,
+    attachments: [],
+    capabilities: requestedCapabilities({ attachments: [], extraCapabilities: [capabilityId] }),
+    preservedDraft: draft.value,
+  })
+}
+
+function capabilityRequestText(capabilityId, value) {
+  if (capabilityId === 'news_search') {
+    return `다음 주제의 최신 뉴스와 핵심 변화를 출처와 함께 요약해줘:\n${value}`
+  }
+  if (capabilityId === 'url_fetch') {
+    return `다음 URL 내용을 가져와 핵심 내용을 요약해줘:\n${value}`
+  }
+  return ''
+}
+
 function startNewChat() {
   stopStream?.()
   stopStream = null
@@ -68,13 +132,16 @@ function startNewChat() {
   attachments.value = []
   sources.value = []
   generatedFiles.value = []
+  folders.value = []
   progress.value = []
   fileNotice.value = ''
+  folderNotice.value = ''
   error.value = null
   runState.value = 'idle'
   sessionId.value = null
   lastRequest.value = null
   selectedTemplateId.value = ''
+  selectedCapabilityIds.value = []
   activePanel.value = 'sources'
 }
 
@@ -114,15 +181,17 @@ function sendDraft() {
 
   const requestAttachments = [...attachments.value]
   const reportTemplate = selectedReportTemplate.value
+  const extraCapabilities = [...selectedCapabilityIds.value]
   const transportText = withReportTemplateInstruction(requestText, reportTemplate)
   dispatchRequest({
     text: transportText,
     displayText: requestText,
     attachments: requestAttachments,
-    capabilities: requestedCapabilities({ attachments: requestAttachments, reportTemplate }),
+    capabilities: requestedCapabilities({ attachments: requestAttachments, reportTemplate, extraCapabilities }),
     preservedDraft: draft.value,
     reportTemplate,
   })
+  selectedCapabilityIds.value = []
 }
 
 function dispatchRequest({
@@ -202,11 +271,13 @@ function requestedCapabilities({
   includeWebSearch = true,
   attachments: requestAttachments = attachments.value,
   reportTemplate = selectedReportTemplate.value,
+  extraCapabilities = selectedCapabilityIds.value,
 } = {}) {
   const nextCapabilities = []
   if (includeWebSearch) nextCapabilities.push('web_search')
   if (requestAttachments.length) nextCapabilities.push('upload_file', 'rag_vector_search', 'get_file_info')
   if (reportTemplate) nextCapabilities.push('write_report', 'format_report', 'list_templates')
+  nextCapabilities.push(...extraCapabilities.filter(Boolean))
   return [...new Set(nextCapabilities)]
 }
 
@@ -249,11 +320,17 @@ function isBusy() {
 }
 
 function updateDriveFile(fileId, updates) {
-  driveFiles.value = driveFiles.value.map((file) => {
-    const actionId = file.fileId || file.storageRef || file.id
-    if (actionId !== fileId) return file
+  const applyUpdates = (file) => {
+    if (fileActionId(file) !== fileId) return file
     return { ...file, ...updates }
-  })
+  }
+  driveFiles.value = driveFiles.value.map(applyUpdates)
+  attachments.value = attachments.value.map(applyUpdates)
+  generatedFiles.value = generatedFiles.value.map(applyUpdates)
+}
+
+function fileActionId(file) {
+  return file?.fileId || file?.file_id || file?.storageRef || file?.storage_ref || file?.id
 }
 
 async function inspectFile(fileId) {
@@ -279,6 +356,68 @@ async function prepareFileDownload(fileId) {
     activePanel.value = 'files'
   } catch (err) {
     fileNotice.value = err.message || '다운로드 링크를 준비하지 못했습니다.'
+  }
+}
+
+async function renameDriveFile(fileId) {
+  const currentFile = [...driveFiles.value, ...attachments.value, ...generatedFiles.value]
+    .find((file) => fileActionId(file) === fileId)
+  const nextName = globalThis.prompt
+    ? globalThis.prompt('새 파일 이름', currentFile?.name || '')
+    : ''
+  const trimmedName = nextName?.trim()
+  if (!trimmedName || trimmedName === currentFile?.name) return
+
+  try {
+    const file = await updateFileName(fileId, trimmedName)
+    updateDriveFile(fileId, file)
+    fileNotice.value = '파일 이름을 변경했습니다.'
+    activePanel.value = 'files'
+  } catch (err) {
+    fileNotice.value = err.message || '파일 이름을 변경하지 못했습니다.'
+    activePanel.value = 'files'
+  }
+}
+
+async function deleteDriveFile(fileId) {
+  const confirmed = globalThis.confirm ? globalThis.confirm('이 Drive 파일을 휴지통으로 이동할까요?') : true
+  if (!confirmed) return
+
+  try {
+    await deleteFile(fileId)
+    driveFiles.value = driveFiles.value.filter((file) => fileActionId(file) !== fileId)
+    attachments.value = attachments.value.filter((file) => fileActionId(file) !== fileId)
+    generatedFiles.value = generatedFiles.value.filter((file) => fileActionId(file) !== fileId)
+    fileNotice.value = '파일을 휴지통으로 이동했습니다.'
+    activePanel.value = 'files'
+  } catch (err) {
+    fileNotice.value = err.message || '파일을 삭제하지 못했습니다.'
+    activePanel.value = 'files'
+  }
+}
+
+async function findDriveFolder(name) {
+  try {
+    folders.value = await findFolders(name)
+    folderNotice.value = folders.value.length
+      ? `${folders.value.length}개 폴더를 찾았습니다.`
+      : '일치하는 폴더가 없습니다.'
+    activePanel.value = 'files'
+  } catch (err) {
+    folderNotice.value = err.message || '폴더를 조회하지 못했습니다.'
+    activePanel.value = 'files'
+  }
+}
+
+async function createDriveFolder(name) {
+  try {
+    const folder = await createFolder(name)
+    folders.value = [folder, ...folders.value.filter((item) => item.id !== folder.id)]
+    folderNotice.value = '폴더를 생성했습니다.'
+    activePanel.value = 'files'
+  } catch (err) {
+    folderNotice.value = err.message || '폴더를 생성하지 못했습니다.'
+    activePanel.value = 'files'
   }
 }
 
@@ -308,7 +447,6 @@ onBeforeUnmount(() => {
             <h2>단일 챗봇</h2>
             <p>텍스트 요청, 파일 첨부, 웹 근거 확인, 산출물 다운로드를 한 화면에서 처리합니다.</p>
           </div>
-          <span>M-001</span>
         </header>
 
         <MessageList
@@ -330,11 +468,20 @@ onBeforeUnmount(() => {
           mobile-collapsed
           :sources="sources"
           :files="panelFiles"
+          :folders="folders"
           :progress="progress"
           :capabilities="capabilities"
           :file-notice="fileNotice"
+          :folder-notice="folderNotice"
+          :busy="isBusy()"
           @inspect-file="inspectFile"
           @prepare-download="prepareFileDownload"
+          @rename-file="renameDriveFile"
+          @delete-file="deleteDriveFile"
+          @find-folder="findDriveFolder"
+          @create-folder="createDriveFolder"
+          @select-capability="applyCapability"
+          @run-capability="runPanelCapability"
         />
 
         <div class="composer-wrap">
@@ -359,11 +506,20 @@ onBeforeUnmount(() => {
         class="desktop-evidence"
         :sources="sources"
         :files="panelFiles"
+        :folders="folders"
         :progress="progress"
         :capabilities="capabilities"
         :file-notice="fileNotice"
+        :folder-notice="folderNotice"
+        :busy="isBusy()"
         @inspect-file="inspectFile"
         @prepare-download="prepareFileDownload"
+        @rename-file="renameDriveFile"
+        @delete-file="deleteDriveFile"
+        @find-folder="findDriveFolder"
+        @create-folder="createDriveFolder"
+        @select-capability="applyCapability"
+        @run-capability="runPanelCapability"
       />
 
     </main>
@@ -427,21 +583,6 @@ p {
   color: var(--m001-muted);
   font-size: 12px;
   line-height: 18px;
-}
-
-.workspace-heading span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 58px;
-  height: 24px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: var(--m001-primary-soft);
-  color: var(--m001-primary);
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
 }
 
 .composer-wrap {

@@ -45,9 +45,24 @@ def test_backend_main_exposes_capability_registry():
         for item in payload
     )
     assert any(
+        item["agent_id"] == "web_research"
+        and item["capability_id"] == "news_search"
+        and item["ui_status"] == "available"
+        and "빠른 실행" in item["ui_surface"]
+        for item in payload
+    )
+    assert any(
+        item["agent_id"] == "web_research"
+        and item["capability_id"] == "url_fetch"
+        and item["ui_status"] == "available"
+        and "빠른 실행" in item["ui_surface"]
+        for item in payload
+    )
+    assert any(
         item["agent_id"] == "file_management"
         and item["capability_id"] == "delete_file"
-        and item["ui_status"] == "planned"
+        and item["ui_status"] == "available"
+        and item["ui_surface"] == "파일 패널"
         for item in payload
     )
     assert any(
@@ -69,6 +84,27 @@ def test_backend_main_exposes_capability_registry():
         and item["capability_id"] == "download_file"
         and item["ui_status"] == "partial"
         and item["ui_surface"] == "파일 패널"
+        for item in payload
+    )
+    assert any(
+        item["agent_id"] == "file_management"
+        and item["capability_id"] == "find_folder"
+        and item["ui_status"] == "available"
+        and item["ui_surface"] == "파일 패널"
+        for item in payload
+    )
+    assert any(
+        item["agent_id"] == "file_management"
+        and item["capability_id"] == "create_folder"
+        and item["ui_status"] == "available"
+        and item["ui_surface"] == "파일 패널"
+        for item in payload
+    )
+    assert any(
+        item["agent_id"] == "file_management"
+        and item["capability_id"] == "update_file"
+        and item["ui_status"] == "partial"
+        and "이름 변경" in item["ui_surface"]
         for item in payload
     )
     assert any(
@@ -190,6 +226,118 @@ def test_backend_main_file_download_route_returns_ui_action_links(monkeypatch):
     assert payload["download"]["url"] == "https://drive.example/download/drive-file-1"
     assert payload["download"]["fallback_open_url"] == "https://drive.example/open/drive-file-1"
     assert payload["download"]["method"] == "open_url"
+
+
+def test_backend_main_folder_routes_return_normalized_folders(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    class FakeDriveClient:
+        def find_folder_by_name(self, name):
+            assert name == "reports"
+            return [
+                {
+                    "folder_id": "folder-1",
+                    "storage_ref": "gdrive://file/folder-1",
+                    "folder_name": "reports",
+                    "web_view_link": "https://drive.example/folders/folder-1",
+                }
+            ]
+
+        def create_folder(self, name, parent_folder_id=None):
+            assert name == "reports"
+            assert parent_folder_id == "parent-1"
+            return {
+                "file_id": "folder-2",
+                "storage_ref": "gdrive://file/folder-2",
+                "folder_name": "reports",
+                "web_view_link": "https://drive.example/folders/folder-2",
+            }
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+    client = TestClient(backend_main.app)
+
+    search_response = client.get("/api/folders", params={"name": "reports"})
+    create_response = client.post(
+        "/api/folders",
+        json={"name": "reports", "parent_folder_id": "parent-1"},
+    )
+
+    assert search_response.status_code == 200
+    folder = search_response.json()["folders"][0]
+    assert folder["id"] == "gdrive://file/folder-1"
+    assert folder["folder_id"] == "folder-1"
+    assert folder["name"] == "reports"
+    assert folder["kind"] == "folder"
+    assert folder["open_url"] == "https://drive.example/folders/folder-1"
+
+    assert create_response.status_code == 200
+    created = create_response.json()["folder"]
+    assert created["id"] == "gdrive://file/folder-2"
+    assert created["folder_id"] == "folder-2"
+
+
+def test_backend_main_file_update_route_renames_drive_file(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    class FakeDriveClient:
+        def update_file(self, file_id, new_name=None):
+            assert file_id == "drive-file-1"
+            assert new_name == "renamed.md"
+            return {
+                "file_id": "drive-file-1",
+                "storage_ref": "gdrive://file/drive-file-1",
+                "filename": "renamed.md",
+                "mime_type": "text/markdown",
+                "web_view_link": "https://drive.example/open/drive-file-1",
+            }
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+
+    response = TestClient(backend_main.app).patch(
+        "/api/files/drive-file-1",
+        json={"name": "renamed.md"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["message"] == "파일 이름 변경 완료"
+    assert payload["file"]["name"] == "renamed.md"
+    assert payload["file"]["id"] == "gdrive://file/drive-file-1"
+
+
+def test_backend_main_file_delete_route_trashes_drive_file(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    deleted_ids = []
+
+    class FakeDriveClient:
+        def delete_file(self, file_id):
+            deleted_ids.append(file_id)
+            return True
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+
+    response = TestClient(backend_main.app).delete("/api/files/drive-file-1")
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert deleted_ids == ["drive-file-1"]
+
+
+def test_backend_main_file_delete_route_returns_404_for_missing_file(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    class FakeDriveClient:
+        def delete_file(self, file_id):
+            assert file_id == "missing-file"
+            return False
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+
+    response = TestClient(backend_main.app).delete("/api/files/missing-file")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "파일을 찾을 수 없습니다"
 
 
 def test_backend_main_chat_post_dispatches_to_router_without_history(monkeypatch):

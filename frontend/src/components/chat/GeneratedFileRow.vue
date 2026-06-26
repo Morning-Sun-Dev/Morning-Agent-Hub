@@ -6,11 +6,12 @@ const props = defineProps({
   file: { type: Object, required: true },
 })
 
-const emit = defineEmits(['inspect', 'prepare-download'])
+const emit = defineEmits(['inspect', 'prepare-download', 'rename', 'delete'])
 
 const downloadUrl = computed(() => safeUrl(props.file.downloadUrl || props.file.download_url))
 const openUrl = computed(() => safeUrl(props.file.openUrl || props.file.open_url))
 const fileActionId = computed(() => props.file.fileId || props.file.file_id || props.file.storageRef || props.file.id)
+const canDelete = computed(() => ['drive', 'uploaded'].includes(props.file.kind))
 </script>
 
 <template>
@@ -39,6 +40,25 @@ const fileActionId = computed(() => props.file.fileId || props.file.file_id || p
       </button>
       <a v-if="downloadUrl" :href="downloadUrl">열기</a>
       <a v-else-if="openUrl" :href="openUrl" target="_blank" rel="noreferrer">열기</a>
+      <button
+        v-if="canDelete"
+        type="button"
+        data-testid="file-rename-button"
+        :disabled="!fileActionId"
+        @click="emit('rename', fileActionId)"
+      >
+        이름 변경
+      </button>
+      <button
+        v-if="canDelete"
+        type="button"
+        class="danger"
+        data-testid="file-delete-button"
+        :disabled="!fileActionId"
+        @click="emit('delete', fileActionId)"
+      >
+        삭제
+      </button>
     </div>
   </article>
 </template>
@@ -114,5 +134,10 @@ button {
 button:disabled {
   color: var(--m001-muted);
   cursor: not-allowed;
+}
+
+button.danger {
+  border-color: var(--m001-danger);
+  color: var(--m001-danger);
 }
 </style>

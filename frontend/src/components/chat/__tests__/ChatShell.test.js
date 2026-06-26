@@ -1,17 +1,24 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  createFolder,
+  deleteFile,
+  findFolders,
   getCapabilities,
   getFileDownloadAction,
   getFileInfo,
   getReportTemplates,
   listFiles,
   streamChat,
+  updateFileName,
   uploadFile,
 } from '../../../api'
 import ChatShell from '../ChatShell.vue'
 
 vi.mock('../../../api', () => ({
+  createFolder: vi.fn(),
+  deleteFile: vi.fn(),
+  findFolders: vi.fn(),
   getCapabilities: vi.fn(),
   getFileDownloadAction: vi.fn(),
   getFileInfo: vi.fn(),
@@ -19,9 +26,14 @@ vi.mock('../../../api', () => ({
   listFiles: vi.fn(),
   uploadFile: vi.fn(),
   streamChat: vi.fn(),
+  updateFileName: vi.fn(),
 }))
 
 describe('ChatShell', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     getCapabilities.mockResolvedValue([
@@ -40,8 +52,8 @@ describe('ChatShell', () => {
         label: 'Drive 파일 삭제',
         description: 'Google Drive 파일을 삭제합니다.',
         enabled: true,
-        uiStatus: 'planned',
-        uiSurface: '',
+        uiStatus: 'available',
+        uiSurface: '파일 패널',
       },
     ])
     getReportTemplates.mockResolvedValue([
@@ -57,6 +69,7 @@ describe('ChatShell', () => {
         id: 'gdrive://file/a',
         fileId: 'drive-file-1',
         name: 'brief.md',
+        kind: 'drive',
         status: 'ready',
         downloadUrl: 'https://drive.example/download/a',
       },
@@ -72,6 +85,31 @@ describe('ChatShell', () => {
       method: 'open_url',
       url: 'https://drive.example/download/a',
       fallbackOpenUrl: null,
+    })
+    deleteFile.mockResolvedValue({
+      file_id: 'drive-file-1',
+      deleted: true,
+    })
+    updateFileName.mockResolvedValue({
+      id: 'gdrive://file/a',
+      fileId: 'drive-file-1',
+      name: 'renamed.md',
+      kind: 'drive',
+      status: 'ready',
+    })
+    findFolders.mockResolvedValue([
+      {
+        id: 'gdrive://file/folder-1',
+        folderId: 'folder-1',
+        name: 'reports',
+        openUrl: 'https://drive.example/folders/folder-1',
+      },
+    ])
+    createFolder.mockResolvedValue({
+      id: 'gdrive://file/folder-2',
+      folderId: 'folder-2',
+      name: 'new reports',
+      openUrl: null,
     })
     streamChat.mockImplementation((_message, _sessionId, handlers) => {
       handlers.onProgress({ stage: 'orchestrator', message: '작업 중', state: 'working' })
@@ -90,6 +128,14 @@ describe('ChatShell', () => {
     expect(wrapper.text()).toContain('응답입니다.')
   })
 
+  it('does not expose internal module ids in the chat workspace', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('단일 챗봇')
+    expect(wrapper.text()).not.toContain('M-001')
+  })
+
   it('shows agent capability coverage in the evidence panel', async () => {
     const wrapper = mount(ChatShell)
     await flushPromises()
@@ -100,7 +146,7 @@ describe('ChatShell', () => {
     expect(wrapper.text()).toContain('웹 검색')
     expect(wrapper.text()).toContain('채팅 입력')
     expect(wrapper.text()).toContain('Drive 파일 삭제')
-    expect(wrapper.text()).toContain('예정')
+    expect(wrapper.text()).toContain('파일 패널')
   })
 
   it('passes uploaded attachments and requested capabilities to the stream', async () => {
@@ -219,6 +265,22 @@ describe('ChatShell', () => {
     ]))
   })
 
+  it('keeps ordinary answers as the default when no report template is selected', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="report-template-select"]').element.value).toBe('')
+    expect(wrapper.get('[data-testid="report-template-select"]').text()).toContain('일반 답변')
+
+    await wrapper.get('textarea').setValue('AI 에이전트 트렌드 알려줘')
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+
+    const [, , , options] = streamChat.mock.calls.at(-1)
+    expect(options.requestedCapabilities).not.toContain('write_report')
+    expect(options.requestedCapabilities).not.toContain('format_report')
+    expect(options.requestedCapabilities).not.toContain('list_templates')
+  })
+
   it('loads drive files and handles file management actions', async () => {
     const wrapper = mount(ChatShell)
     await flushPromises()
@@ -234,5 +296,96 @@ describe('ChatShell', () => {
     await wrapper.get('[data-testid="file-download-button"]').trigger('click')
     expect(getFileDownloadAction).toHaveBeenCalledWith('drive-file-1')
     expect(wrapper.text()).toContain('다운로드 링크가 준비됐습니다.')
+  })
+
+  it('deletes a drive file from the file panel after confirmation', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '파일').trigger('click')
+    expect(wrapper.text()).toContain('brief.md')
+
+    await wrapper.get('[data-testid="file-delete-button"]').trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledWith('이 Drive 파일을 휴지통으로 이동할까요?')
+    expect(deleteFile).toHaveBeenCalledWith('drive-file-1')
+    expect(wrapper.text()).toContain('파일을 휴지통으로 이동했습니다.')
+    expect(wrapper.text()).not.toContain('brief.md')
+  })
+
+  it('renames a drive file from the file panel after confirmation', async () => {
+    vi.stubGlobal('prompt', vi.fn(() => 'renamed.md'))
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '파일').trigger('click')
+    await wrapper.get('[data-testid="file-rename-button"]').trigger('click')
+    await flushPromises()
+
+    expect(prompt).toHaveBeenCalledWith('새 파일 이름', 'brief.md')
+    expect(updateFileName).toHaveBeenCalledWith('drive-file-1', 'renamed.md')
+    expect(wrapper.text()).toContain('파일 이름을 변경했습니다.')
+    expect(wrapper.text()).toContain('renamed.md')
+  })
+
+  it('finds and creates Drive folders from the file panel', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '파일').trigger('click')
+    await wrapper.get('[data-testid="folder-name-input"]').setValue('reports')
+    await wrapper.get('[data-testid="folder-find-button"]').trigger('click')
+    await flushPromises()
+
+    expect(findFolders).toHaveBeenCalledWith('reports')
+    expect(wrapper.text()).toContain('1개 폴더를 찾았습니다.')
+    expect(wrapper.text()).toContain('reports')
+
+    await wrapper.get('[data-testid="folder-name-input"]').setValue('new reports')
+    await wrapper.get('[data-testid="folder-create-button"]').trigger('click')
+    await flushPromises()
+
+    expect(createFolder).toHaveBeenCalledWith('new reports')
+    expect(wrapper.text()).toContain('폴더를 생성했습니다.')
+    expect(wrapper.text()).toContain('new reports')
+  })
+
+  it('turns a capability quick action into a requested chat capability', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '기능').trigger('click')
+    const quickActions = wrapper.findAll('[data-testid="capability-request-button"]')
+    await quickActions.at(1).trigger('click')
+
+    expect(wrapper.get('textarea').element.value).toContain('휴지통')
+
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+
+    const [, , , options] = streamChat.mock.calls.at(-1)
+    expect(options.requestedCapabilities).toEqual(expect.arrayContaining(['delete_file']))
+  })
+
+  it('runs web capability quick inputs with explicit requested capabilities', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '기능').trigger('click')
+    await wrapper.get('[data-testid="news-query-input"]').setValue('AI 에이전트 시장')
+    await wrapper.get('[data-testid="news-search-button"]').trigger('click')
+
+    const [newsMessage, , , newsOptions] = streamChat.mock.calls.at(-1)
+    expect(newsMessage).toContain('AI 에이전트 시장')
+    expect(newsOptions.requestedCapabilities).toEqual(expect.arrayContaining(['web_search', 'news_search']))
+
+    await wrapper.findAll('button').find((button) => button.text() === '기능').trigger('click')
+    await wrapper.get('[data-testid="url-fetch-input"]').setValue('https://example.com/report')
+    await wrapper.get('[data-testid="url-fetch-button"]').trigger('click')
+
+    const [urlMessage, , , urlOptions] = streamChat.mock.calls.at(-1)
+    expect(urlMessage).toContain('https://example.com/report')
+    expect(urlOptions.requestedCapabilities).toEqual(expect.arrayContaining(['web_search', 'url_fetch']))
   })
 })

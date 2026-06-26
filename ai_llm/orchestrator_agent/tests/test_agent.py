@@ -1,5 +1,6 @@
 import sys
 import os
+import importlib.util
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
@@ -7,6 +8,19 @@ import asyncio
 import time
 from unittest.mock import MagicMock, AsyncMock, patch
 from models import IntentPlan, PlanStep, AgentResult, TraceStep
+
+
+def test_system_prompt_keeps_reports_opt_in():
+    """일반 정보 요청은 보고서가 아니라 일반 Markdown 답변이 기본이다."""
+    agent_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agent.py"))
+    spec = importlib.util.spec_from_file_location("orchestrator_agent_prompt_test", agent_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert "기본 최종 결과물은 보고서가 아니라 일반 Markdown 답변" in module.SYSTEM_PROMPT
+    assert "report_writing은" in module.SYSTEM_PROMPT
+    assert "명시" in module.SYSTEM_PROMPT
+    assert "일반 정보 요청만으로는 report_writing을 호출하지 마세요" in module.SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio

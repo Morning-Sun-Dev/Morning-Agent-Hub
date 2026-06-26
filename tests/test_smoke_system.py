@@ -2,6 +2,7 @@ import json
 
 from scripts.smoke_system import (
     parse_sse_events,
+    run_smoke,
     validate_health_payload,
     validate_capability_payload,
     validate_stream_events,
@@ -30,8 +31,12 @@ def test_validate_capability_payload_requires_core_capabilities():
     payload = [
         {"agent_id": "orchestrator", "capability_id": "route_request"},
         {"agent_id": "web_research", "capability_id": "web_search"},
+        {"agent_id": "web_research", "capability_id": "news_search"},
+        {"agent_id": "web_research", "capability_id": "url_fetch"},
         {"agent_id": "internal_rag", "capability_id": "rag_vector_search"},
         {"agent_id": "file_management", "capability_id": "upload_file"},
+        {"agent_id": "file_management", "capability_id": "list_files"},
+        {"agent_id": "file_management", "capability_id": "download_file"},
         {"agent_id": "report_writing", "capability_id": "write_report"},
     ]
 
@@ -65,11 +70,23 @@ def test_validate_health_payload_requires_healthy_stack():
 def test_validate_stream_events_requires_answer_content():
     result = validate_stream_events([
         {"type": "status", "state": "working"},
-        {"type": "answer", "content": "## 답변\n\n완료"},
+        {
+            "type": "answer",
+            "content": "## 답변\n\n완료",
+            "session_id": "session_1",
+            "run_id": "run_1",
+            "status": "completed",
+            "sources": [],
+            "files": [],
+            "progress": [],
+            "artifacts": [],
+            "error": None,
+        },
     ])
 
     assert result.passed is True
     assert result.status == "pass"
+    assert "run_1" in result.detail
 
 
 def test_validate_stream_events_rejects_missing_answer():
@@ -81,3 +98,78 @@ def test_validate_stream_events_rejects_missing_answer():
     assert result.passed is False
     assert result.status == "fail"
     assert "answer" in result.detail
+
+
+def test_validate_stream_events_rejects_legacy_answer_payload():
+    result = validate_stream_events([
+        {"type": "status", "state": "working"},
+        {"type": "answer", "content": "완료"},
+    ])
+
+    assert result.passed is False
+    assert result.status == "fail"
+    assert "structured fields" in result.detail
+
+
+def test_validate_stream_events_rejects_non_list_evidence_fields():
+    result = validate_stream_events([
+        {
+            "type": "answer",
+            "content": "완료",
+            "session_id": "session_1",
+            "run_id": "run_1",
+            "status": "completed",
+            "sources": {},
+            "files": [],
+            "progress": [],
+            "artifacts": [],
+            "error": None,
+        },
+    ])
+
+    assert result.passed is False
+    assert result.status == "fail"
+    assert "sources" in result.detail
+
+
+def test_run_smoke_passes_requested_capabilities_to_stream_query():
+    class FakeClient:
+        def get_json(self, path):
+            if path == "/api/health":
+                return {"status": "healthy", "agents": []}
+            if path == "/api/capabilities":
+                return [
+                    {"capability_id": "route_request"},
+                    {"capability_id": "web_search"},
+                    {"capability_id": "news_search"},
+                    {"capability_id": "url_fetch"},
+                    {"capability_id": "rag_vector_search"},
+                    {"capability_id": "upload_file"},
+                    {"capability_id": "list_files"},
+                    {"capability_id": "download_file"},
+                    {"capability_id": "write_report"},
+                ]
+            if path == "/api/report-templates":
+                return [{"id": "general"}]
+            raise AssertionError(path)
+
+        def get_text(self, path, query=None):
+            assert path == "/api/chat/stream"
+            assert json.loads(query["requested_capabilities"]) == ["news_search"]
+            return "\n".join([
+                'data: {"type":"status","state":"working"}',
+                (
+                    'data: {"type":"answer","content":"완료","session_id":"s1",'
+                    '"run_id":"r1","status":"completed","sources":[],"files":[],'
+                    '"progress":[],"artifacts":[],"error":null}'
+                ),
+                "data: [DONE]",
+            ])
+
+    results = run_smoke(
+        FakeClient(),
+        message="뉴스 확인",
+        requested_capabilities=["news_search"],
+    )
+
+    assert all(result.passed for result in results)

@@ -4,6 +4,7 @@ import {
   normalizeCapability,
   normalizeChatPayload,
   normalizeFileArtifact,
+  normalizeFolder,
   normalizeProgress,
   normalizeReportTemplate,
   normalizeSessionMessage,
@@ -140,6 +141,37 @@ export async function getFileDownloadAction(fileId) {
     url: safeUrl(download.url),
     fallbackOpenUrl: safeUrl(download.fallback_open_url || download.fallbackOpenUrl),
   }
+}
+
+export async function deleteFile(fileId) {
+  return parseJson(await fetch(`${BASE}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }))
+}
+
+export async function updateFileName(fileId, name) {
+  const payload = await parseJson(await fetch(`${BASE}/files/${encodeURIComponent(fileId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  }))
+  return normalizeFileArtifact(payload.file || {})
+}
+
+export async function findFolders(name) {
+  const params = new URLSearchParams({ name })
+  const payload = await parseJson(await fetch(`${BASE}/folders?${params}`))
+  return (payload.folders || []).map(normalizeFolder)
+}
+
+export async function createFolder(name, parentFolderId = null) {
+  const payload = await parseJson(await fetch(`${BASE}/folders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      parent_folder_id: parentFolderId,
+    }),
+  }))
+  return normalizeFolder(payload.folder || {})
 }
 
 export async function getCapabilities() {

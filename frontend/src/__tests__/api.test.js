@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  createFolder,
+  deleteFile,
+  findFolders,
   getCapabilities,
   getFileDownloadAction,
   getFileInfo,
@@ -7,6 +10,7 @@ import {
   listFiles,
   sendChat,
   streamChat,
+  updateFileName,
   uploadFile,
 } from '../api'
 
@@ -205,7 +209,7 @@ describe('api adapter', () => {
   })
 
   it('loads file list, metadata, and download actions', async () => {
-    const fetchMock = vi.fn(async (url) => {
+    const fetchMock = vi.fn(async (url, options = {}) => {
       if (url === '/api/files') {
         return new Response(JSON.stringify({
           files: [{
@@ -217,6 +221,21 @@ describe('api adapter', () => {
             download_url: 'https://drive.example/download/a',
           }],
           count: 1,
+        }), { status: 200 })
+      }
+      if (url === '/api/files/drive-file-1' && options.method === 'DELETE') {
+        return new Response(JSON.stringify({
+          file_id: 'drive-file-1',
+          deleted: true,
+        }), { status: 200 })
+      }
+      if (url === '/api/files/drive-file-1' && options.method === 'PATCH') {
+        return new Response(JSON.stringify({
+          file: {
+            file_id: 'drive-file-1',
+            storage_ref: 'gdrive://file/a',
+            name: 'renamed.md',
+          },
         }), { status: 200 })
       }
       if (url === '/api/files/drive-file-1') {
@@ -235,6 +254,25 @@ describe('api adapter', () => {
             available: true,
             method: 'open_url',
             url: 'https://drive.example/download/a',
+          },
+        }), { status: 200 })
+      }
+      if (url === '/api/folders?name=reports') {
+        return new Response(JSON.stringify({
+          folders: [{
+            folder_id: 'folder-1',
+            storage_ref: 'gdrive://file/folder-1',
+            folder_name: 'reports',
+            web_view_link: 'https://drive.example/folders/folder-1',
+          }],
+        }), { status: 200 })
+      }
+      if (url === '/api/folders' && options.method === 'POST') {
+        return new Response(JSON.stringify({
+          folder: {
+            folder_id: 'folder-2',
+            storage_ref: 'gdrive://file/folder-2',
+            folder_name: 'new reports',
           },
         }), { status: 200 })
       }
@@ -261,5 +299,29 @@ describe('api adapter', () => {
       url: 'https://drive.example/download/a',
       fallbackOpenUrl: null,
     })
+    await expect(deleteFile('drive-file-1')).resolves.toEqual({
+      file_id: 'drive-file-1',
+      deleted: true,
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/files/drive-file-1', { method: 'DELETE' })
+    await expect(updateFileName('drive-file-1', 'renamed.md')).resolves.toEqual(expect.objectContaining({
+      fileId: 'drive-file-1',
+      name: 'renamed.md',
+    }))
+    expect(fetchMock).toHaveBeenCalledWith('/api/files/drive-file-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ name: 'renamed.md' }),
+    }))
+    await expect(findFolders('reports')).resolves.toEqual([
+      expect.objectContaining({
+        folderId: 'folder-1',
+        name: 'reports',
+        openUrl: 'https://drive.example/folders/folder-1',
+      }),
+    ])
+    await expect(createFolder('new reports')).resolves.toEqual(expect.objectContaining({
+      folderId: 'folder-2',
+      name: 'new reports',
+    }))
   })
 })
