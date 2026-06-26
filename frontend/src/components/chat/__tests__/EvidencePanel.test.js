@@ -135,98 +135,28 @@ describe('EvidencePanel', () => {
     expect(wrapper.emitted('create-folder')).toEqual([['reports']])
   })
 
-  it('emits capability quick actions from the capability panel', async () => {
-    const capability = {
-      agentId: 'file_management',
-      capabilityId: 'delete_file',
-      label: 'Drive 파일 삭제',
-      description: '파일을 휴지통으로 이동합니다.',
-      enabled: true,
-      uiStatus: 'available',
-      uiSurface: '파일 패널',
-    }
+  it('does not expose the temporary capability panel in the UI', () => {
     const wrapper = mount(EvidencePanel, {
       props: {
         sources: [],
         files: [],
         progress: [],
-        capabilities: [capability],
+        capabilities: [{
+          agentId: 'file_management',
+          capabilityId: 'delete_file',
+          label: 'Drive 파일 삭제',
+          description: '파일을 휴지통으로 이동합니다.',
+          enabled: true,
+          uiStatus: 'available',
+          uiSurface: '파일 패널',
+        }],
         activeTab: 'capabilities',
       },
     })
 
-    await wrapper.get('[data-testid="capability-request-button"]').trigger('click')
-
-    expect(wrapper.emitted('select-capability')).toEqual([[capability]])
-  })
-
-  it('emits web capability quick-run inputs from the capability panel', async () => {
-    const wrapper = mount(EvidencePanel, {
-      props: {
-        sources: [],
-        files: [],
-        progress: [],
-        capabilities: [],
-        activeTab: 'capabilities',
-      },
-    })
-
-    await wrapper.get('[data-testid="news-query-input"]').setValue('AI 에이전트 시장')
-    await wrapper.get('[data-testid="news-search-button"]').trigger('click')
-
-    await wrapper.get('[data-testid="url-fetch-input"]').setValue('https://example.com/report')
-    await wrapper.get('[data-testid="url-fetch-button"]').trigger('click')
-
-    expect(wrapper.emitted('run-capability')).toEqual([
-      [{ capabilityId: 'news_search', value: 'AI 에이전트 시장' }],
-      [{ capabilityId: 'url_fetch', value: 'https://example.com/report' }],
-    ])
-  })
-
-  it('emits card-level capability quick runs for partial capabilities', async () => {
-    const wrapper = mount(EvidencePanel, {
-      props: {
-        sources: [],
-        files: [],
-        progress: [],
-        capabilities: [
-          {
-            agentId: 'internal_rag',
-            capabilityId: 'rag_sql_search',
-            label: '문서 메타데이터 검색',
-            description: '메타데이터 조건으로 문서를 검색합니다.',
-            enabled: true,
-            uiStatus: 'partial',
-            uiSurface: '기능 패널 요청 초안',
-          },
-          {
-            agentId: 'report_writing',
-            capabilityId: 'list_templates',
-            label: '보고서 양식 조회',
-            description: '사용 가능한 보고서 양식을 조회합니다.',
-            enabled: true,
-            uiStatus: 'partial',
-            uiSurface: '채팅 입력',
-          },
-        ],
-        activeTab: 'capabilities',
-      },
-    })
-
-    const inputs = wrapper.findAll('[data-testid="capability-run-input"]')
-    const buttons = wrapper.findAll('[data-testid="capability-run-button"]')
-
-    expect(inputs.at(0).attributes('placeholder')).toBe('예: 2026년 PDF 문서')
-    expect(wrapper.text()).toContain('메타데이터 조건')
-    expect(wrapper.text()).toContain('사용 가능한 보고서 양식 목록과 용도를 조회합니다.')
-
-    await inputs.at(0).setValue('2026년 PDF 문서')
-    await buttons.at(0).trigger('click')
-    await buttons.at(1).trigger('click')
-
-    expect(wrapper.emitted('run-capability')).toEqual([
-      [{ capabilityId: 'rag_sql_search', value: '2026년 PDF 문서' }],
-      [{ capabilityId: 'list_templates', value: '' }],
-    ])
+    expect(wrapper.findAll('.panel-tabs button').map((button) => button.text())).toEqual(['출처', '파일', '진행'])
+    expect(wrapper.find('[data-testid="capability-request-button"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="capability-run-button"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Drive 파일 삭제')
   })
 })
