@@ -362,7 +362,18 @@ class OrchestratorAgent:
         )
         final_llm = ChatOpenAI(model="gpt-4o")
         messages = [
-            {"role": "system", "content": "여러 에이전트의 결과를 통합하여 사용자에게 명확한 답변을 제공하세요."},
+            {
+                "role": "system",
+                "content": (
+                    "여러 에이전트의 결과를 통합하여 사용자에게 명확한 답변을 제공하세요.\n\n"
+                    "## 답변 형식 규칙 (반드시 준수)\n"
+                    "- 답변 전체를 마크다운 형식으로 작성하세요.\n"
+                    "- 핵심 요약을 첫 문단에 1~2문장으로 제시하세요.\n"
+                    "- 세부 내용은 `##` 소제목과 목록(`-`, `1.`)으로 구분하세요.\n"
+                    "- 중요 용어나 수치는 **굵게** 표시하세요.\n"
+                    "- 출처가 있으면 답변 끝에 `---\\n**출처:**` 섹션으로 분리하세요."
+                ),
+            },
             {
                 "role": "user",
                 "content": f"원본 질문: {query}\n\n에이전트 결과:\n{results_text}\n\n위 정보를 바탕으로 답변해주세요.",
@@ -415,7 +426,7 @@ class OrchestratorAgent:
                 "is_task_complete": True,
                 "require_user_input": False,
                 "content": (
-                    "[AI 직접 답변] 사내 문서를 참조하지 않은 답변입니다.\n\n"
+                    "> ⚠️ **AI 직접 답변** — 사내 문서를 참조하지 않은 답변입니다.\n\n"
                     + plan.direct_answer
                 ),
                 "trace": trace,
@@ -488,19 +499,19 @@ class OrchestratorAgent:
                 and not self._is_rag_no_result(last_result.content):
             # RAG 답변: 이미 문서 기반으로 생성됨 — 재합성 없이 직접 반환
             # answer_from_documents()가 **출처:** 섹션을 이미 포함하므로 prefix만 추가
-            final_response = "[사내 문서 기반]\n\n" + last_result.content
+            final_response = "> 📄 **사내 문서 기반 답변**\n\n" + last_result.content
 
         elif last_result and last_result.agent == "web_research" and last_result.success:
             # 웹 폴백 결과: 사내 문서 미발견 안내 + 웹 출처 명시
             final_response = (
-                "[웹 검색 기반] 사내 문서에서 관련 내용을 찾지 못해 웹에서 검색했습니다.\n\n"
+                "> 🌐 **웹 검색 기반** — 사내 문서에서 관련 내용을 찾지 못해 웹에서 검색했습니다.\n\n"
                 + (last_result.content or "웹에서도 관련 정보를 찾지 못했습니다.")
             )
 
         else:
             # 그 외 멀티 에이전트 결과는 gpt-4o로 통합 요약
             raw = await self.generate_final_response(query, results)
-            final_response = "💭 **[AI 통합 답변]**\n\n" + raw
+            final_response = "> 💭 **AI 통합 답변**\n\n" + raw
 
         yield {
             "is_task_complete": True,
