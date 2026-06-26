@@ -20,7 +20,7 @@ from supabase import Client
 logger = logging.getLogger(__name__)
 
 _llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-_answer_llm = ChatOpenAI(model="gpt-4o")
+_answer_llm = ChatOpenAI(model="gpt-4o-mini")
 _embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
 

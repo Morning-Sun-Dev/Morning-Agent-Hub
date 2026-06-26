@@ -107,7 +107,7 @@ class WebResearchAgent:
     """MCP 기반 웹 검색 에이전트 — Tavily MCP 서버 사용"""
 
     def __init__(self):
-        self.model = ChatOpenAI(model="gpt-4o")
+        self.model = ChatOpenAI(model="gpt-4o-mini")
         self.mcp_client = None
         self.agent = None
         self.initialized = False
