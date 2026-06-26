@@ -54,7 +54,7 @@ AGENTS = {
 def start_backend() -> subprocess.Popen:
     print("  Starting FastAPI Backend on port 8000...")
     return subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "backend.api.main:app",
+        [sys.executable, "-m", "uvicorn", "backend.main:app",
          "--host", "0.0.0.0", "--port", "8000"],
         cwd=str(PROJECT_ROOT),
         env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)},

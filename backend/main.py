@@ -188,7 +188,7 @@ def main():
     logger.info("=" * 60)
 
     uvicorn.run(
-        "main:app",
+        "backend.main:app",
         host=host,
         port=port,
         reload=False,
