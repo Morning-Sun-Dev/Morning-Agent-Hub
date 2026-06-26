@@ -8,10 +8,20 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.pytest_cache/
 
 # Google Drive 인증
 credentials.json
 token.json
+
+# Runtime / generated artifacts
+running_agents.pids
+*.pid
+test_result*.txt
+.logs/
+frontend/dist/
+dist/
+coverage/
 
 # 기타
 .DS_Store
