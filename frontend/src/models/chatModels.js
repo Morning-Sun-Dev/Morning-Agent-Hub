@@ -20,14 +20,16 @@ export function createMessage(overrides = {}) {
 
 export function createAttachment(uploadResult = {}, file = null) {
   const status = normalizeFileStatus(uploadResult.index_status || uploadResult.status)
+  const storageRef = uploadResult.storage_ref || uploadResult.storageRef || null
 
   return {
-    id: uploadResult.storage_ref || uploadResult.id || fallbackId('file'),
+    id: storageRef || uploadResult.id || fallbackId('file'),
+    fileId: uploadResult.file_id || uploadResult.fileId || driveFileIdFromStorageRef(storageRef),
     name: uploadResult.filename || uploadResult.name || file?.name || '파일',
     kind: uploadResult.kind || 'uploaded',
     mimeType: file?.type || uploadResult.mime_type || 'application/octet-stream',
     size: file?.size || uploadResult.size || 0,
-    storageRef: uploadResult.storage_ref || uploadResult.storageRef || null,
+    storageRef,
     status,
     detail: uploadResult.index_message || uploadResult.message || uploadResult.detail || '',
     openUrl: safeUrl(uploadResult.web_view_link || uploadResult.open_url || uploadResult.openUrl),
@@ -51,8 +53,9 @@ export function normalizeSource(source = {}) {
 }
 
 export function normalizeFileArtifact(file = {}) {
-  return createAttachment({
+  const artifact = createAttachment({
     id: file.id,
+    file_id: file.file_id || file.fileId,
     name: file.name || file.filename,
     kind: file.kind || 'uploaded',
     status: file.status,
@@ -64,6 +67,10 @@ export function normalizeFileArtifact(file = {}) {
     message: file.message,
     detail: file.detail,
   })
+  return {
+    ...artifact,
+    fileId: file.file_id || file.fileId || artifact.fileId,
+  }
 }
 
 export function normalizeProgress(item = {}) {
@@ -155,6 +162,13 @@ function toContractFileStatus(status) {
   if (status === 'downloadable') return 'downloadable'
   if (status === 'uploaded') return 'uploaded'
   return 'indexed'
+}
+
+function driveFileIdFromStorageRef(storageRef) {
+  if (typeof storageRef !== 'string') return null
+  const prefix = 'gdrive://file/'
+  if (!storageRef.startsWith(prefix)) return null
+  return storageRef.slice(prefix.length) || null
 }
 
 export function safeUrl(value) {

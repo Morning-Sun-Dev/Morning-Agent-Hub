@@ -53,4 +53,26 @@ describe('EvidencePanel', () => {
 
     expect(wrapper.find('a').exists()).toBe(false)
   })
+
+  it('emits file management actions from file rows', async () => {
+    const wrapper = mount(EvidencePanel, {
+      props: {
+        sources: [],
+        files: [{
+          id: 'gdrive://file/a',
+          fileId: 'drive-file-1',
+          name: 'brief.md',
+          downloadUrl: 'https://drive.example/download/a',
+        }],
+        progress: [],
+        activeTab: 'files',
+      },
+    })
+
+    await wrapper.get('[data-testid="file-info-button"]').trigger('click')
+    await wrapper.get('[data-testid="file-download-button"]').trigger('click')
+
+    expect(wrapper.emitted('inspect-file')).toEqual([['drive-file-1']])
+    expect(wrapper.emitted('prepare-download')).toEqual([['drive-file-1']])
+  })
 })

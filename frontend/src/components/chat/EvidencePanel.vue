@@ -9,11 +9,12 @@ const props = defineProps({
   files: { type: Array, default: () => [] },
   progress: { type: Array, default: () => [] },
   capabilities: { type: Array, default: () => [] },
+  fileNotice: { type: String, default: '' },
   activeTab: { type: String, default: 'sources' },
   mobileCollapsed: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:activeTab'])
+const emit = defineEmits(['update:activeTab', 'inspect-file', 'prepare-download'])
 const expanded = ref(false)
 const showMobileSummary = computed(() => props.mobileCollapsed && !expanded.value)
 const itemCount = computed(() => (
@@ -86,12 +87,20 @@ function statusLabel(status) {
         </div>
 
         <div v-if="activeTab === 'files'" class="panel-stack">
+          <div v-if="fileNotice" class="file-notice" role="status">{{ fileNotice }}</div>
           <div v-if="files.length === 0" class="empty-panel">
             <span>f</span>
             <strong>아직 표시할 파일이 없습니다</strong>
             <p>생성 파일이나 첨부 파일 링크가 준비되면 여기에 표시됩니다.</p>
           </div>
-          <GeneratedFileRow v-for="file in files" v-else :key="file.id || file.name" :file="file" />
+          <GeneratedFileRow
+            v-for="file in files"
+            v-else
+            :key="file.id || file.name"
+            :file="file"
+            @inspect="emit('inspect-file', $event)"
+            @prepare-download="emit('prepare-download', $event)"
+          />
         </div>
 
         <div v-if="activeTab === 'progress'" class="panel-stack">
@@ -246,6 +255,16 @@ p {
   border: 1px solid var(--m001-border);
   border-radius: var(--m001-radius-card);
   background: white;
+}
+
+.file-notice {
+  padding: 10px 12px;
+  border: 1px solid var(--m001-success-soft);
+  border-radius: var(--m001-radius-control);
+  background: var(--m001-success-soft);
+  color: var(--m001-success);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .capability-card > div,

@@ -7,6 +7,7 @@ import {
   normalizeProgress,
   normalizeReportTemplate,
   normalizeSessionMessage,
+  safeUrl,
   serializeAttachment,
 } from './models/chatModels'
 
@@ -123,6 +124,22 @@ export async function uploadFile(file) {
 export async function listFiles() {
   const payload = await parseJson(await fetch(`${BASE}/files`))
   return (payload.files || []).map(normalizeFileArtifact)
+}
+
+export async function getFileInfo(fileId) {
+  const payload = await parseJson(await fetch(`${BASE}/files/${encodeURIComponent(fileId)}`))
+  return normalizeFileArtifact(payload.file || {})
+}
+
+export async function getFileDownloadAction(fileId) {
+  const payload = await parseJson(await fetch(`${BASE}/files/${encodeURIComponent(fileId)}/download`))
+  const download = payload.download || {}
+  return {
+    available: Boolean(download.available && safeUrl(download.url)),
+    method: download.method || 'open_url',
+    url: safeUrl(download.url),
+    fallbackOpenUrl: safeUrl(download.fallback_open_url || download.fallbackOpenUrl),
+  }
 }
 
 export async function getCapabilities() {

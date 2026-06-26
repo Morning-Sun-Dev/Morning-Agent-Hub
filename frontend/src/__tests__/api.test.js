@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getCapabilities, getReportTemplates, sendChat, streamChat, uploadFile } from '../api'
+import {
+  getCapabilities,
+  getFileDownloadAction,
+  getFileInfo,
+  getReportTemplates,
+  listFiles,
+  sendChat,
+  streamChat,
+  uploadFile,
+} from '../api'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -193,5 +202,64 @@ describe('api adapter', () => {
         sectionCount: 5,
       },
     ])
+  })
+
+  it('loads file list, metadata, and download actions', async () => {
+    const fetchMock = vi.fn(async (url) => {
+      if (url === '/api/files') {
+        return new Response(JSON.stringify({
+          files: [{
+            file_id: 'drive-file-1',
+            storage_ref: 'gdrive://file/a',
+            name: 'brief.md',
+            status: 'downloadable',
+            open_url: 'https://drive.example/open/a',
+            download_url: 'https://drive.example/download/a',
+          }],
+          count: 1,
+        }), { status: 200 })
+      }
+      if (url === '/api/files/drive-file-1') {
+        return new Response(JSON.stringify({
+          file: {
+            file_id: 'drive-file-1',
+            storage_ref: 'gdrive://file/a',
+            name: 'brief.md',
+            detail: 'text/markdown',
+          },
+        }), { status: 200 })
+      }
+      if (url === '/api/files/drive-file-1/download') {
+        return new Response(JSON.stringify({
+          download: {
+            available: true,
+            method: 'open_url',
+            url: 'https://drive.example/download/a',
+          },
+        }), { status: 200 })
+      }
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listFiles()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'gdrive://file/a',
+        fileId: 'drive-file-1',
+        name: 'brief.md',
+        downloadUrl: 'https://drive.example/download/a',
+      }),
+    ])
+    await expect(getFileInfo('drive-file-1')).resolves.toEqual(expect.objectContaining({
+      id: 'gdrive://file/a',
+      fileId: 'drive-file-1',
+      name: 'brief.md',
+    }))
+    await expect(getFileDownloadAction('drive-file-1')).resolves.toEqual({
+      available: true,
+      method: 'open_url',
+      url: 'https://drive.example/download/a',
+      fallbackOpenUrl: null,
+    })
   })
 })
