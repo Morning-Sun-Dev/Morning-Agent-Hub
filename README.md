@@ -31,32 +31,20 @@
 | File Management | 10013 | Google Drive 파일 관리 |
 | **Report Writing** | **10014** | **양식 기반 보고서 작성 (FastAPI)** |
 
-## 보고서 작성 에이전트
+## 작업 기준 문서
 
-다른 에이전트에서 수집한 데이터를 지정된 양식에 맞춰 마크다운 보고서로 작성합니다.
+팀원이 같은 기준으로 작업할 수 있도록 폴더별 `AGENTS.md`를 둡니다. Codex와 다른 코딩 에이전트는 가까운 `AGENTS.md`를 우선 참고하므로, 공통 규칙은 루트에 두고 세부 규칙은 담당 폴더에 둡니다.
 
-**지원 양식:**
-
-| ID | 이름 | 용도 |
-|----|------|------|
-| `executive_summary` | 임원 요약 보고서 | 핵심 결론, 권고사항 중심 |
-| `research_report` | 조사 보고서 | 웹/RAG 조사 결과 정리 |
-| `technical_report` | 기술 보고서 | 기술 분석, 아키텍처 |
-| `meeting_minutes` | 회의록 | 논의, 결정, 액션 아이템 |
-| `general` | 일반 보고서 | 범용 양식 |
-
-**워크플로우 예시:**
-
-```
-"AI 트렌드 조사 후 조사 보고서로 작성"
-  → web_research → report_writing
-
-"사내 문서 검색 후 임원 보고서 작성"
-  → internal_rag → report_writing
-
-"조사 → 보고서 → Drive 저장"
-  → web_research → report_writing → file_management
-```
+| 위치 | 용도 |
+|------|------|
+| `AGENTS.md` | 저장소 전체 작업 규칙, 검증, PR 기준 |
+| `ai_llm/AGENTS.md` | A2A 에이전트 공통 규칙 |
+| `ai_llm/*_agent/AGENTS.md` | 개별 에이전트 책임과 artifact 규칙 |
+| `backend/AGENTS.md` | FastAPI 라우트, 스키마, SSE 계약 |
+| `frontend/AGENTS.md` | Vue UI, API adapter, 화면 테스트 기준 |
+| `common/AGENTS.md` | 공유 계약 모델 변경 기준 |
+| `tests/AGENTS.md` | 회귀 테스트 배치와 실행 기준 |
+| `.github/AGENTS.md` | PR 템플릿, 이슈 템플릿, CI 변경 기준 |
 
 ## 환경 설정
 
@@ -122,7 +110,7 @@ python -m backend.api.main                                  # :8000
 ```bash
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"query": "AI 트렌드를 조사해서 조사 보고서로 작성해줘"}'
+  -d '{"message": "AI 트렌드를 조사해서 조사 보고서로 작성해줘"}'
 ```
 
 ### CLI 테스트
@@ -134,17 +122,20 @@ python test_client.py
 ## 파일 구조
 
 ```
-CHAP11_final-project/
+Morning-Agent-Hub/
+├── AGENTS.md                    # 저장소 전체 작업 기준
 ├── README.md
 ├── requirements.txt
 ├── start_agents.py             # 에이전트 일괄 시작
 ├── test_client.py              # CLI 테스트 클라이언트
-├── .github/                    # CI, PR/Issue 템플릿
+├── .github/                    # CI, PR/Issue 템플릿, GitHub 작업 기준
 ├── backend/
-│   ├── main.py                 # 레거시 FastAPI 게이트웨이 (:8000)
+│   ├── AGENTS.md               # 백엔드 작업 기준
+│   ├── main.py                 # FastAPI 게이트웨이 (:8000)
 │   └── api/                    # REST API (세션, 채팅, 파일 업로드)
-├── frontend/                   # Vue.js 웹 UI
+├── frontend/                   # Vue.js 웹 UI, 프론트 작업 기준 포함
 ├── common/                     # 공통 스키마, 설정, A2A 클라이언트
+├── tests/                      # 백엔드/계약 회귀 테스트
 └── ai_llm/
     ├── orchestrator_agent/     # Host Agent (:10010)
     ├── web_research_agent/     # Remote Agent (:10011)
