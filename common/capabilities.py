@@ -101,7 +101,8 @@ _CAPABILITIES = [
         capability_id="delete_file",
         label="Drive 파일 삭제",
         description="Google Drive 파일을 휴지통으로 이동하거나 삭제합니다.",
-        ui_status="planned",
+        ui_status="available",
+        ui_surface="파일 패널",
     ),
     CapabilityDescriptor(
         agent_id="file_management",

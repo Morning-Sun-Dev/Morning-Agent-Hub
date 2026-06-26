@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  deleteFile,
   getCapabilities,
   getFileDownloadAction,
   getFileInfo,
@@ -12,6 +13,7 @@ import {
 import ChatShell from '../ChatShell.vue'
 
 vi.mock('../../../api', () => ({
+  deleteFile: vi.fn(),
   getCapabilities: vi.fn(),
   getFileDownloadAction: vi.fn(),
   getFileInfo: vi.fn(),
@@ -22,6 +24,10 @@ vi.mock('../../../api', () => ({
 }))
 
 describe('ChatShell', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     getCapabilities.mockResolvedValue([
@@ -57,6 +63,7 @@ describe('ChatShell', () => {
         id: 'gdrive://file/a',
         fileId: 'drive-file-1',
         name: 'brief.md',
+        kind: 'drive',
         status: 'ready',
         downloadUrl: 'https://drive.example/download/a',
       },
@@ -72,6 +79,10 @@ describe('ChatShell', () => {
       method: 'open_url',
       url: 'https://drive.example/download/a',
       fallbackOpenUrl: null,
+    })
+    deleteFile.mockResolvedValue({
+      file_id: 'drive-file-1',
+      deleted: true,
     })
     streamChat.mockImplementation((_message, _sessionId, handlers) => {
       handlers.onProgress({ stage: 'orchestrator', message: '작업 중', state: 'working' })
@@ -234,5 +245,38 @@ describe('ChatShell', () => {
     await wrapper.get('[data-testid="file-download-button"]').trigger('click')
     expect(getFileDownloadAction).toHaveBeenCalledWith('drive-file-1')
     expect(wrapper.text()).toContain('다운로드 링크가 준비됐습니다.')
+  })
+
+  it('deletes a drive file from the file panel after confirmation', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '파일').trigger('click')
+    expect(wrapper.text()).toContain('brief.md')
+
+    await wrapper.get('[data-testid="file-delete-button"]').trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledWith('이 Drive 파일을 휴지통으로 이동할까요?')
+    expect(deleteFile).toHaveBeenCalledWith('drive-file-1')
+    expect(wrapper.text()).toContain('파일을 휴지통으로 이동했습니다.')
+    expect(wrapper.text()).not.toContain('brief.md')
+  })
+
+  it('turns a capability quick action into a requested chat capability', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '기능').trigger('click')
+    const quickActions = wrapper.findAll('[data-testid="capability-request-button"]')
+    await quickActions.at(1).trigger('click')
+
+    expect(wrapper.get('textarea').element.value).toContain('휴지통')
+
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+
+    const [, , , options] = streamChat.mock.calls.at(-1)
+    expect(options.requestedCapabilities).toEqual(expect.arrayContaining(['delete_file']))
   })
 })

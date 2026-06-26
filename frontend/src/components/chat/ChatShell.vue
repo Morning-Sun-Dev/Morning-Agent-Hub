@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createMessage, createProgress } from '../../models/chatModels'
 import {
+  deleteFile,
   getCapabilities,
   getFileDownloadAction,
   getFileInfo,
@@ -28,12 +29,34 @@ const driveFiles = ref([])
 const capabilities = ref([])
 const reportTemplates = ref([])
 const selectedTemplateId = ref('')
+const selectedCapabilityIds = ref([])
 const fileNotice = ref('')
 const error = ref(null)
 const sessionId = ref(null)
 const lastRequest = ref(null)
 
 let stopStream = null
+
+const capabilityPromptMap = {
+  route_request: '이 요청을 적절한 에이전트 실행 계획으로 분해해줘.',
+  web_search: '이 주제의 최신 정보를 출처와 함께 검색해줘.',
+  news_search: '이 주제의 최신 뉴스와 핵심 변화를 출처와 함께 요약해줘.',
+  url_fetch: '다음 URL 내용을 가져와 핵심 내용을 요약해줘:\nhttps://',
+  rag_vector_search: '사내 문서에서 이 주제와 관련된 근거를 찾아 답변해줘.',
+  rag_sql_search: '문서 유형, 날짜, 작성자 같은 메타데이터 조건으로 관련 문서를 찾아줘.',
+  rag_index: '선택한 Drive 파일을 인덱싱하고 검색 가능 상태로 만들어줘.',
+  upload_file: '이 내용을 Google Drive 파일로 저장해줘.',
+  download_file: 'Drive 파일을 다운로드 가능한 링크로 준비해줘.\n파일 ID 또는 gdrive://file/: ',
+  get_file_info: 'Drive 파일의 이름, 크기, 형식, 수정일 정보를 확인해줘.\n파일 ID 또는 gdrive://file/: ',
+  find_folder: 'Google Drive에서 다음 폴더를 찾아줘:\n폴더명: ',
+  list_files: 'Google Drive 파일 목록을 보여줘.',
+  delete_file: '다음 Drive 파일을 휴지통으로 이동해줘.\n파일 ID 또는 gdrive://file/: ',
+  update_file: '다음 Drive 파일의 이름이나 내용을 업데이트해줘.\n파일 ID 또는 gdrive://file/: ',
+  create_folder: 'Google Drive에 새 폴더를 만들어줘.\n폴더명: ',
+  write_report: '수집한 정보를 Markdown 보고서로 작성해줘.',
+  format_report: '다음 내용을 선택한 보고서 양식에 맞춰 정리해줘.',
+  list_templates: '사용 가능한 보고서 양식 목록과 각 용도를 알려줘.',
+}
 
 const runningMessage = computed(() => {
   if (runState.value !== 'running') return null
@@ -60,6 +83,15 @@ function applyPrompt(prompt) {
   draft.value = prompt
 }
 
+function applyCapability(capability) {
+  const capabilityId = capability?.capabilityId
+  if (!capabilityId) return
+
+  selectedCapabilityIds.value = [capabilityId]
+  draft.value = capabilityPromptMap[capabilityId] || `${capability.label || '선택한 기능'}을 사용해줘.`
+  activePanel.value = 'capabilities'
+}
+
 function startNewChat() {
   stopStream?.()
   stopStream = null
@@ -75,6 +107,7 @@ function startNewChat() {
   sessionId.value = null
   lastRequest.value = null
   selectedTemplateId.value = ''
+  selectedCapabilityIds.value = []
   activePanel.value = 'sources'
 }
 
@@ -114,15 +147,17 @@ function sendDraft() {
 
   const requestAttachments = [...attachments.value]
   const reportTemplate = selectedReportTemplate.value
+  const extraCapabilities = [...selectedCapabilityIds.value]
   const transportText = withReportTemplateInstruction(requestText, reportTemplate)
   dispatchRequest({
     text: transportText,
     displayText: requestText,
     attachments: requestAttachments,
-    capabilities: requestedCapabilities({ attachments: requestAttachments, reportTemplate }),
+    capabilities: requestedCapabilities({ attachments: requestAttachments, reportTemplate, extraCapabilities }),
     preservedDraft: draft.value,
     reportTemplate,
   })
+  selectedCapabilityIds.value = []
 }
 
 function dispatchRequest({
@@ -202,11 +237,13 @@ function requestedCapabilities({
   includeWebSearch = true,
   attachments: requestAttachments = attachments.value,
   reportTemplate = selectedReportTemplate.value,
+  extraCapabilities = selectedCapabilityIds.value,
 } = {}) {
   const nextCapabilities = []
   if (includeWebSearch) nextCapabilities.push('web_search')
   if (requestAttachments.length) nextCapabilities.push('upload_file', 'rag_vector_search', 'get_file_info')
   if (reportTemplate) nextCapabilities.push('write_report', 'format_report', 'list_templates')
+  nextCapabilities.push(...extraCapabilities.filter(Boolean))
   return [...new Set(nextCapabilities)]
 }
 
@@ -250,10 +287,13 @@ function isBusy() {
 
 function updateDriveFile(fileId, updates) {
   driveFiles.value = driveFiles.value.map((file) => {
-    const actionId = file.fileId || file.storageRef || file.id
-    if (actionId !== fileId) return file
+    if (fileActionId(file) !== fileId) return file
     return { ...file, ...updates }
   })
+}
+
+function fileActionId(file) {
+  return file?.fileId || file?.file_id || file?.storageRef || file?.storage_ref || file?.id
 }
 
 async function inspectFile(fileId) {
@@ -279,6 +319,23 @@ async function prepareFileDownload(fileId) {
     activePanel.value = 'files'
   } catch (err) {
     fileNotice.value = err.message || '다운로드 링크를 준비하지 못했습니다.'
+  }
+}
+
+async function deleteDriveFile(fileId) {
+  const confirmed = globalThis.confirm ? globalThis.confirm('이 Drive 파일을 휴지통으로 이동할까요?') : true
+  if (!confirmed) return
+
+  try {
+    await deleteFile(fileId)
+    driveFiles.value = driveFiles.value.filter((file) => fileActionId(file) !== fileId)
+    attachments.value = attachments.value.filter((file) => fileActionId(file) !== fileId)
+    generatedFiles.value = generatedFiles.value.filter((file) => fileActionId(file) !== fileId)
+    fileNotice.value = '파일을 휴지통으로 이동했습니다.'
+    activePanel.value = 'files'
+  } catch (err) {
+    fileNotice.value = err.message || '파일을 삭제하지 못했습니다.'
+    activePanel.value = 'files'
   }
 }
 
@@ -335,6 +392,8 @@ onBeforeUnmount(() => {
           :file-notice="fileNotice"
           @inspect-file="inspectFile"
           @prepare-download="prepareFileDownload"
+          @delete-file="deleteDriveFile"
+          @select-capability="applyCapability"
         />
 
         <div class="composer-wrap">
@@ -364,6 +423,8 @@ onBeforeUnmount(() => {
         :file-notice="fileNotice"
         @inspect-file="inspectFile"
         @prepare-download="prepareFileDownload"
+        @delete-file="deleteDriveFile"
+        @select-capability="applyCapability"
       />
 
     </main>

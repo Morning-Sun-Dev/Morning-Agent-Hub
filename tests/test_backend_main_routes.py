@@ -47,7 +47,8 @@ def test_backend_main_exposes_capability_registry():
     assert any(
         item["agent_id"] == "file_management"
         and item["capability_id"] == "delete_file"
-        and item["ui_status"] == "planned"
+        and item["ui_status"] == "available"
+        and item["ui_surface"] == "파일 패널"
         for item in payload
     )
     assert any(
@@ -190,6 +191,41 @@ def test_backend_main_file_download_route_returns_ui_action_links(monkeypatch):
     assert payload["download"]["url"] == "https://drive.example/download/drive-file-1"
     assert payload["download"]["fallback_open_url"] == "https://drive.example/open/drive-file-1"
     assert payload["download"]["method"] == "open_url"
+
+
+def test_backend_main_file_delete_route_trashes_drive_file(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    deleted_ids = []
+
+    class FakeDriveClient:
+        def delete_file(self, file_id):
+            deleted_ids.append(file_id)
+            return True
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+
+    response = TestClient(backend_main.app).delete("/api/files/drive-file-1")
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert deleted_ids == ["drive-file-1"]
+
+
+def test_backend_main_file_delete_route_returns_404_for_missing_file(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    class FakeDriveClient:
+        def delete_file(self, file_id):
+            assert file_id == "missing-file"
+            return False
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+
+    response = TestClient(backend_main.app).delete("/api/files/missing-file")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "파일을 찾을 수 없습니다"
 
 
 def test_backend_main_chat_post_dispatches_to_router_without_history(monkeypatch):
