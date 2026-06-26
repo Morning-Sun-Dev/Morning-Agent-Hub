@@ -35,4 +35,28 @@ describe('MessageComposer', () => {
 
     expect(wrapper.emitted('submit')).toHaveLength(1)
   })
+
+  it('emits selected report template changes', async () => {
+    const wrapper = mount(MessageComposer, {
+      props: {
+        modelValue: '보고서로 작성해줘',
+        attachments: [],
+        sending: false,
+        error: null,
+        reportTemplates: [
+          {
+            id: 'research_report',
+            name: 'Research Report',
+            description: '조사 보고서',
+            sectionCount: 5,
+          },
+        ],
+        selectedTemplateId: '',
+      },
+    })
+
+    await wrapper.get('[data-testid="report-template-select"]').setValue('research_report')
+
+    expect(wrapper.emitted('update:selectedTemplateId')).toEqual([['research_report']])
+  })
 })

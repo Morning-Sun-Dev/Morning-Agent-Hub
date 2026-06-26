@@ -50,6 +50,13 @@ def test_backend_main_exposes_capability_registry():
         and item["ui_status"] == "planned"
         for item in payload
     )
+    assert any(
+        item["agent_id"] == "report_writing"
+        and item["capability_id"] == "list_templates"
+        and item["ui_status"] == "partial"
+        and item["ui_surface"] == "채팅 입력"
+        for item in payload
+    )
 
 
 def test_backend_main_chat_post_dispatches_to_router_without_history(monkeypatch):

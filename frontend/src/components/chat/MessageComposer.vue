@@ -7,9 +7,18 @@ const props = defineProps({
   attachments: { type: Array, default: () => [] },
   sending: { type: Boolean, default: false },
   error: { type: String, default: null },
+  reportTemplates: { type: Array, default: () => [] },
+  selectedTemplateId: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:modelValue', 'submit', 'pick-file', 'remove-attachment', 'retry'])
+const emit = defineEmits([
+  'update:modelValue',
+  'update:selectedTemplateId',
+  'submit',
+  'pick-file',
+  'remove-attachment',
+  'retry',
+])
 
 const fileInput = ref(null)
 const canSend = computed(() => {
@@ -67,6 +76,25 @@ function onEnter(event) {
         <button type="button" class="tool-button" aria-label="파일 첨부" @click="fileInput?.click()">첨부</button>
         <span class="tool-chip">웹 검색</span>
         <span class="tool-chip">출처 포함</span>
+        <label v-if="reportTemplates.length" class="template-select-wrap">
+          <span class="sr-only">보고서 양식</span>
+          <select
+            data-testid="report-template-select"
+            class="template-select"
+            :value="selectedTemplateId"
+            :disabled="sending"
+            @change="emit('update:selectedTemplateId', $event.target.value)"
+          >
+            <option value="">보고서 양식</option>
+            <option
+              v-for="template in reportTemplates"
+              :key="template.id"
+              :value="template.id"
+            >
+              {{ template.name }}
+            </option>
+          </select>
+        </label>
       </div>
       <button
         data-testid="send-button"
@@ -151,6 +179,26 @@ textarea::placeholder {
 
 .tool-button {
   cursor: pointer;
+}
+
+.template-select-wrap {
+  display: inline-flex;
+  min-width: 142px;
+}
+
+.template-select {
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--m001-border);
+  border-radius: var(--m001-radius-control);
+  background: var(--m001-surface);
+  color: var(--m001-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.template-select:disabled {
+  color: var(--m001-muted);
 }
 
 .search-chip {

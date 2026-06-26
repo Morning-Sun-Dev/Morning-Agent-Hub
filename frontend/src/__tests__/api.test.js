@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getCapabilities, sendChat, streamChat, uploadFile } from '../api'
+import { getCapabilities, getReportTemplates, sendChat, streamChat, uploadFile } from '../api'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -163,6 +163,34 @@ describe('api adapter', () => {
         enabled: true,
         uiStatus: 'available',
         uiSurface: '채팅 입력',
+      },
+    ])
+  })
+
+  it('loads and normalizes report templates', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify([
+          {
+            id: 'research_report',
+            name: 'Research Report',
+            description: '조사 보고서',
+            section_count: 5,
+          },
+        ]), { status: 200 }),
+      ),
+    )
+
+    const templates = await getReportTemplates()
+
+    expect(fetch).toHaveBeenCalledWith('/api/report-templates')
+    expect(templates).toEqual([
+      {
+        id: 'research_report',
+        name: 'Research Report',
+        description: '조사 보고서',
+        sectionCount: 5,
       },
     ])
   })

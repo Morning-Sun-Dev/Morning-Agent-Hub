@@ -5,6 +5,7 @@ import {
   normalizeChatPayload,
   normalizeFileArtifact,
   normalizeProgress,
+  normalizeReportTemplate,
   normalizeSessionMessage,
   serializeAttachment,
 } from './models/chatModels'
@@ -127,4 +128,9 @@ export async function listFiles() {
 export async function getCapabilities() {
   const payload = await parseJson(await fetch(`${BASE}/capabilities`))
   return (payload || []).map(normalizeCapability)
+}
+
+export async function getReportTemplates() {
+  const payload = await parseJson(await fetch(`${BASE}/report-templates`))
+  return (payload || []).map(normalizeReportTemplate).filter((template) => template.id)
 }

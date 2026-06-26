@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createMessage, createProgress } from '../../models/chatModels'
-import { getCapabilities, streamChat, uploadFile } from '../../api'
+import { getCapabilities, getReportTemplates, streamChat, uploadFile } from '../../api'
 import ChatHeader from './ChatHeader.vue'
 import EvidencePanel from './EvidencePanel.vue'
 import MessageComposer from './MessageComposer.vue'
@@ -17,6 +17,8 @@ const progress = ref([])
 const sources = ref([])
 const generatedFiles = ref([])
 const capabilities = ref([])
+const reportTemplates = ref([])
+const selectedTemplateId = ref('')
 const error = ref(null)
 const sessionId = ref(null)
 const lastRequest = ref(null)
@@ -33,6 +35,10 @@ const runningMessage = computed(() => {
     progress: progress.value,
   })
 })
+
+const selectedReportTemplate = computed(() =>
+  reportTemplates.value.find((template) => template.id === selectedTemplateId.value) || null,
+)
 
 function applyPrompt(prompt) {
   draft.value = prompt
@@ -51,6 +57,7 @@ function startNewChat() {
   runState.value = 'idle'
   sessionId.value = null
   lastRequest.value = null
+  selectedTemplateId.value = ''
   activePanel.value = 'sources'
 }
 
@@ -89,24 +96,37 @@ function sendDraft() {
   if ((!messageText && attachments.value.length === 0) || isBusy()) return
 
   const requestAttachments = [...attachments.value]
+  const reportTemplate = selectedReportTemplate.value
+  const transportText = withReportTemplateInstruction(requestText, reportTemplate)
   dispatchRequest({
-    text: requestText,
+    text: transportText,
+    displayText: requestText,
     attachments: requestAttachments,
-    capabilities: requestedCapabilities({ attachments: requestAttachments }),
+    capabilities: requestedCapabilities({ attachments: requestAttachments, reportTemplate }),
     preservedDraft: draft.value,
+    reportTemplate,
   })
 }
 
-function dispatchRequest({ text, attachments: requestAttachments, capabilities, preservedDraft }) {
+function dispatchRequest({
+  text,
+  displayText = text,
+  attachments: requestAttachments,
+  capabilities,
+  preservedDraft,
+  reportTemplate = null,
+}) {
   lastRequest.value = {
     text,
+    displayText,
     attachments: requestAttachments,
     capabilities,
     preservedDraft,
+    reportTemplate,
   }
   messages.value.push(createMessage({
     role: 'user',
-    content: text,
+    content: displayText,
     files: requestAttachments,
   }))
   draft.value = ''
@@ -161,11 +181,27 @@ function dispatchRequest({ text, attachments: requestAttachments, capabilities, 
   })
 }
 
-function requestedCapabilities({ includeWebSearch = true, attachments: requestAttachments = attachments.value } = {}) {
-  const capabilities = []
-  if (includeWebSearch) capabilities.push('web_search')
-  if (requestAttachments.length) capabilities.push('upload_file', 'rag_vector_search', 'get_file_info')
-  return capabilities
+function requestedCapabilities({
+  includeWebSearch = true,
+  attachments: requestAttachments = attachments.value,
+  reportTemplate = selectedReportTemplate.value,
+} = {}) {
+  const nextCapabilities = []
+  if (includeWebSearch) nextCapabilities.push('web_search')
+  if (requestAttachments.length) nextCapabilities.push('upload_file', 'rag_vector_search', 'get_file_info')
+  if (reportTemplate) nextCapabilities.push('write_report', 'format_report', 'list_templates')
+  return [...new Set(nextCapabilities)]
+}
+
+function withReportTemplateInstruction(text, reportTemplate) {
+  if (!reportTemplate) return text
+  return [
+    text,
+    '',
+    '[보고서 양식]',
+    `template_id: ${reportTemplate.id}`,
+    `template_name: ${reportTemplate.name}`,
+  ].join('\n')
 }
 
 function retryFailedStep() {
@@ -177,13 +213,17 @@ function continueWithFilesOnly() {
   if (isBusy()) return
   const previous = lastRequest.value
   const requestAttachments = previous?.attachments?.length ? previous.attachments : [...attachments.value]
-  const baseText = previous?.text || draft.value.trim() || '첨부 파일을 분석해줘.'
-  const text = `${baseText}\n\n웹 검색 없이 첨부 파일 기준으로만 계속해줘.`
+  const reportTemplate = previous?.reportTemplate || selectedReportTemplate.value
+  const baseText = previous?.displayText || previous?.text || draft.value.trim() || '첨부 파일을 분석해줘.'
+  const displayText = `${baseText}\n\n웹 검색 없이 첨부 파일 기준으로만 계속해줘.`
+  const text = withReportTemplateInstruction(displayText, reportTemplate)
   dispatchRequest({
     text,
+    displayText,
     attachments: requestAttachments,
-    capabilities: requestedCapabilities({ includeWebSearch: false, attachments: requestAttachments }),
-    preservedDraft: text,
+    capabilities: requestedCapabilities({ includeWebSearch: false, attachments: requestAttachments, reportTemplate }),
+    preservedDraft: displayText,
+    reportTemplate,
   })
 }
 
@@ -192,11 +232,12 @@ function isBusy() {
 }
 
 onMounted(async () => {
-  try {
-    capabilities.value = await getCapabilities()
-  } catch {
-    capabilities.value = []
-  }
+  const [capabilityResult, templateResult] = await Promise.allSettled([
+    getCapabilities(),
+    getReportTemplates(),
+  ])
+  capabilities.value = capabilityResult.status === 'fulfilled' ? capabilityResult.value : []
+  reportTemplates.value = templateResult.status === 'fulfilled' ? templateResult.value : []
 })
 
 onBeforeUnmount(() => {
@@ -246,6 +287,9 @@ onBeforeUnmount(() => {
             :attachments="attachments"
             :sending="runState === 'running' || runState === 'uploading'"
             :error="error"
+            :report-templates="reportTemplates"
+            :selected-template-id="selectedTemplateId"
+            @update:selected-template-id="selectedTemplateId = $event"
             @submit="sendDraft"
             @pick-file="uploadAttachment"
             @remove-attachment="removeAttachment"

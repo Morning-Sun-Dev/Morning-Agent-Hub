@@ -109,6 +109,15 @@ export function normalizeCapability(capability = {}) {
   }
 }
 
+export function normalizeReportTemplate(template = {}) {
+  return {
+    id: template.id || '',
+    name: template.name || template.id || '보고서 양식',
+    description: template.description || '',
+    sectionCount: template.section_count ?? template.sectionCount ?? 0,
+  }
+}
+
 export function serializeAttachment(attachment = {}) {
   return {
     id: attachment.storageRef || attachment.storage_ref || attachment.id || fallbackId('file'),
