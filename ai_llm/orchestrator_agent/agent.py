@@ -136,7 +136,7 @@ class OrchestratorAgent:
         if not api_key:
             raise ValueError("OPENAI_API_KEY 환경 변수가 필요합니다")
 
-        self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        self.llm = ChatOpenAI(model="gpt-5.4-mini", temperature=0)
         self.httpx_client = None
         self.remote_agents: Dict[str, A2AClient] = {}
         self.initialized = False
