@@ -51,6 +51,27 @@ def test_backend_main_exposes_capability_registry():
         for item in payload
     )
     assert any(
+        item["agent_id"] == "file_management"
+        and item["capability_id"] == "list_files"
+        and item["ui_status"] == "available"
+        and item["ui_surface"] == "파일 패널"
+        for item in payload
+    )
+    assert any(
+        item["agent_id"] == "file_management"
+        and item["capability_id"] == "get_file_info"
+        and item["ui_status"] == "available"
+        and item["ui_surface"] == "파일 패널"
+        for item in payload
+    )
+    assert any(
+        item["agent_id"] == "file_management"
+        and item["capability_id"] == "download_file"
+        and item["ui_status"] == "partial"
+        and item["ui_surface"] == "파일 패널"
+        for item in payload
+    )
+    assert any(
         item["agent_id"] == "report_writing"
         and item["capability_id"] == "list_templates"
         and item["ui_status"] == "partial"
