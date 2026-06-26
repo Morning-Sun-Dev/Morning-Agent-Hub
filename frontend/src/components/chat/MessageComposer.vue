@@ -77,7 +77,7 @@ function onEnter(event) {
         <span class="tool-chip">웹 검색</span>
         <span class="tool-chip">출처 포함</span>
         <label v-if="reportTemplates.length" class="template-select-wrap">
-          <span class="sr-only">보고서 양식</span>
+          <span class="sr-only">답변 형식</span>
           <select
             data-testid="report-template-select"
             class="template-select"
@@ -85,7 +85,7 @@ function onEnter(event) {
             :disabled="sending"
             @change="emit('update:selectedTemplateId', $event.target.value)"
           >
-            <option value="">보고서 양식</option>
+            <option value="">일반 답변</option>
             <option
               v-for="template in reportTemplates"
               :key="template.id"

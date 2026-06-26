@@ -128,6 +128,14 @@ describe('ChatShell', () => {
     expect(wrapper.text()).toContain('응답입니다.')
   })
 
+  it('does not expose internal module ids in the chat workspace', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('단일 챗봇')
+    expect(wrapper.text()).not.toContain('M-001')
+  })
+
   it('shows agent capability coverage in the evidence panel', async () => {
     const wrapper = mount(ChatShell)
     await flushPromises()
@@ -255,6 +263,22 @@ describe('ChatShell', () => {
       'format_report',
       'list_templates',
     ]))
+  })
+
+  it('keeps ordinary answers as the default when no report template is selected', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="report-template-select"]').element.value).toBe('')
+    expect(wrapper.get('[data-testid="report-template-select"]').text()).toContain('일반 답변')
+
+    await wrapper.get('textarea').setValue('AI 에이전트 트렌드 알려줘')
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+
+    const [, , , options] = streamChat.mock.calls.at(-1)
+    expect(options.requestedCapabilities).not.toContain('write_report')
+    expect(options.requestedCapabilities).not.toContain('format_report')
+    expect(options.requestedCapabilities).not.toContain('list_templates')
   })
 
   it('loads drive files and handles file management actions', async () => {
