@@ -78,7 +78,7 @@ _CAPABILITIES = [
         capability_id="get_file_info",
         label="파일 정보 조회",
         description="Drive 파일의 이름, 크기, MIME 타입, 링크 등 메타데이터를 조회합니다.",
-        ui_status="partial",
+        ui_status="available",
         ui_surface="파일 패널",
     ),
     CapabilityDescriptor(
@@ -93,8 +93,8 @@ _CAPABILITIES = [
         capability_id="list_files",
         label="Drive 파일 목록",
         description="Drive 파일 목록을 조회하고 검색어로 필터링합니다.",
-        ui_status="partial",
-        ui_surface="파일 API",
+        ui_status="available",
+        ui_surface="파일 패널",
     ),
     CapabilityDescriptor(
         agent_id="file_management",

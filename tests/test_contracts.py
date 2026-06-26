@@ -204,3 +204,15 @@ def test_capability_registry_covers_every_shared_capability():
         item.capability_id == "delete_file" and item.ui_status == "planned"
         for item in capabilities
     )
+    assert any(
+        item.capability_id == "list_files"
+        and item.ui_status == "available"
+        and item.ui_surface == "파일 패널"
+        for item in capabilities
+    )
+    assert any(
+        item.capability_id == "get_file_info"
+        and item.ui_status == "available"
+        and item.ui_surface == "파일 패널"
+        for item in capabilities
+    )
