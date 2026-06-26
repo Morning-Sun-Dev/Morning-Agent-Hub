@@ -207,7 +207,8 @@ class RAGState(TypedDict):
     """RAG 에이전트 상태"""
     intent: str                      # 인텐트: search, index
     raw_input: str                   # 원본 입력
-    question: str                    # 검색 질문
+    question: str                    # 검색 질문 (contextualize_question이 정제)
+    is_contextual: bool              # 맥락 의존 질문 여부 (이전 대화 참조)
     search_type: str                 # 검색 방식: vector, sql
     search_results: List[Dict]       # 검색 결과
     sources: List[Dict]              # 출처 정보
@@ -251,6 +252,42 @@ class SearchTypeClassification(BaseModel): # [ 3 ]
 # ============================================================================
 # 노드 함수들
 # ============================================================================
+
+def contextualize_question(state: RAGState) -> RAGState:
+    """
+    raw_input 정제 및 맥락 의존 질문 감지
+
+    역할:
+      1. 이전 대화 이력 포맷 아티팩트 제거 ("[이전 대화]", "[현재 질문]" 등)
+      2. 지시어("그것", "위에서" 등) 기반 맥락 의존 질문 여부 플래그 설정
+      3. 맥락 의존 질문은 경고 로그 후 원본 그대로 전달 (이력 없이 해석 불가)
+    """
+    logger.info("[RAG AGENT] [CONTEXTUALIZE] 시작")
+    raw = state.get("raw_input", "")
+
+    # [이전 대화] ... [현재 질문] 포맷 아티팩트 제거
+    if "[현재 질문]" in raw:
+        raw = raw.split("[현재 질문]")[-1].strip()
+        logger.info("[RAG AGENT] [CONTEXTUALIZE] 이력 포맷 아티팩트 제거 완료")
+
+    # 맥락 의존 표현 감지
+    CONTEXT_MARKERS = [
+        "그것", "그게", "그거", "이것", "이게", "저것",
+        "위에서", "앞에서", "방금", "아까", "그 내용",
+        "더 자세히", "그 항목", "그 조건", "거기서", "해당 내용",
+    ]
+    is_contextual = any(marker in raw for marker in CONTEXT_MARKERS)
+
+    if is_contextual:
+        logger.warning(
+            f"[RAG AGENT] [CONTEXTUALIZE] 맥락 의존 질문 감지 (이력 없음): '{raw[:50]}...'"
+        )
+
+    return {
+        "raw_input": raw,
+        "is_contextual": is_contextual,
+    }
+
 
 def intent_router(state: RAGState) -> RAGState:
     """
@@ -380,13 +417,20 @@ def generate(state: RAGState) -> RAGState:
     sources = [Source(**s) for s in raw_sources]  # dict → Source 객체
 
     if not search_results:
-        return {
-            "answer": (
+        is_contextual = state.get("is_contextual", False)
+        if is_contextual:
+            no_result_msg = (
+                "이전 대화를 참조하는 질문인 것 같습니다. "
+                "현재 검색은 대화 이력을 참고하지 않으므로, "
+                "궁금한 내용을 구체적인 키워드로 다시 질문해 주세요.\n"
+                "예) '그것의 조건' → '인공지능 친화적 공공데이터의 관리 조건'"
+            )
+        else:
+            no_result_msg = (
                 "현재 인덱싱된 문서에서 관련 내용을 찾지 못했습니다. "
                 "문서가 인덱싱되어 있는지 확인하거나, 다른 표현으로 질문해 보세요."
-            ),
-            "sources": raw_sources,
-        }
+            )
+        return {"answer": no_result_msg, "sources": raw_sources}
 
     if search_type == "sql":
         answer = build_list_response(search_results, sources)      # M-007
@@ -485,6 +529,9 @@ def create_rag_graph():
         START
           │
           ▼
+      contextualize_question   ← 포맷 아티팩트 제거, 맥락 의존 질문 감지
+          │
+          ▼
       intent_router
           │
           ├──────────────────┐
@@ -510,6 +557,7 @@ def create_rag_graph():
 
     graph_builder = StateGraph(RAGState)
 
+    graph_builder.add_node("contextualize_question", contextualize_question)
     graph_builder.add_node("intent_router", intent_router)
     graph_builder.add_node("search_router", search_router)
     graph_builder.add_node("vector_search", vector_search)
@@ -517,7 +565,8 @@ def create_rag_graph():
     graph_builder.add_node("generate", generate)
     graph_builder.add_node("index_document_node", index_document_node)
 
-    graph_builder.add_edge(START, "intent_router")
+    graph_builder.add_edge(START, "contextualize_question")
+    graph_builder.add_edge("contextualize_question", "intent_router")
 
     graph_builder.add_conditional_edges(
         "intent_router",
@@ -560,6 +609,7 @@ class InternalRAGAgent:
     """
 
     NODE_MESSAGES = { # [ 1 ]
+        "contextualize_question": "🧹 질문 정제 중...",
         "intent_router": "🎯 요청 분석 중...",
         "search_router": "🔍 검색 방식 결정 중...",
         "vector_search": "📊 벡터 유사도 검색 중...",

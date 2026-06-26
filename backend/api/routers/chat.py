@@ -137,7 +137,8 @@ async def chat(req: ChatRequest):
 
     try:
         client = await get_a2a_client()
-        response = await client.send_message("orchestrator", prompt)
+        # 현재 질문만 전달 — 이력을 함께 보내면 RAG 벡터 검색 쿼리가 오염됨
+        response = await client.send_message("orchestrator", req.message)
 
         chat_response = build_chat_response(response, session_id=session_id)
 
@@ -171,7 +172,8 @@ async def chat_stream(message: str, session_id: str | None = None):
             yield _sse_data({"type": "status", "state": "working"})
 
             client = await get_a2a_client()
-            response = await client.send_message("orchestrator", prompt)
+            # 현재 질문만 전달 — 이력을 함께 보내면 RAG 벡터 검색 쿼리가 오염됨
+            response = await client.send_message("orchestrator", message)
 
             chat_response = build_chat_response(response, session_id=resolved_id)
 
