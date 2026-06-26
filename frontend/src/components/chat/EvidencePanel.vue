@@ -33,9 +33,10 @@ const folderName = ref('')
 const newsQuery = ref('')
 const urlValue = ref('')
 const capabilityValues = ref({})
+const showCapabilityPanel = false
 const showMobileSummary = computed(() => props.mobileCollapsed && !expanded.value)
 const itemCount = computed(() => (
-  props.sources.length + props.files.length + props.folders.length + props.progress.length + props.capabilities.length
+  props.sources.length + props.files.length + props.folders.length + props.progress.length
 ))
 const canRunNews = computed(() => Boolean(newsQuery.value.trim()) && !props.busy)
 const canRunUrl = computed(() => isHttpUrl(urlValue.value.trim()) && !props.busy)
@@ -137,8 +138,10 @@ const tabs = [
   { id: 'sources', label: '출처' },
   { id: 'files', label: '파일' },
   { id: 'progress', label: '진행' },
-  { id: 'capabilities', label: '기능' },
 ]
+const visibleActiveTab = computed(() => (
+  tabs.some((tab) => tab.id === props.activeTab) ? props.activeTab : 'sources'
+))
 
 const uiStatusLabel = {
   available: '사용 가능',
@@ -255,7 +258,7 @@ function isHttpUrl(value) {
           v-for="tab in tabs"
           :key="tab.id"
           type="button"
-          :class="{ active: activeTab === tab.id }"
+          :class="{ active: visibleActiveTab === tab.id }"
           @click="emit('update:activeTab', tab.id)"
         >
           {{ tab.label }}
@@ -263,7 +266,7 @@ function isHttpUrl(value) {
       </nav>
 
       <div class="panel-body">
-        <div v-if="activeTab === 'sources'" class="panel-stack">
+        <div v-if="visibleActiveTab === 'sources'" class="panel-stack">
           <div v-if="sources.length === 0" class="empty-panel">
             <span>i</span>
             <strong>아직 표시할 근거가 없습니다</strong>
@@ -272,7 +275,7 @@ function isHttpUrl(value) {
           <SourceCard v-for="source in sources" v-else :key="source.url || source.title" :source="source" />
         </div>
 
-        <div v-if="activeTab === 'files'" class="panel-stack">
+        <div v-if="visibleActiveTab === 'files'" class="panel-stack">
           <form class="folder-tools" aria-label="Drive 폴더 작업" @submit.prevent="submitFolderSearch">
             <input
               v-model="folderName"
@@ -316,7 +319,7 @@ function isHttpUrl(value) {
           />
         </div>
 
-        <div v-if="activeTab === 'progress'" class="panel-stack">
+        <div v-if="visibleActiveTab === 'progress'" class="panel-stack">
           <div v-if="progress.length === 0" class="empty-panel">
             <span>p</span>
             <strong>진행 중인 작업이 없습니다</strong>
@@ -325,7 +328,7 @@ function isHttpUrl(value) {
           <ProgressTrace v-else :progress="progress" />
         </div>
 
-        <div v-if="activeTab === 'capabilities'" class="panel-stack">
+        <div v-if="showCapabilityPanel" class="panel-stack">
           <section class="capability-tools" aria-label="웹 기능 빠른 실행">
             <form class="capability-tool" @submit.prevent="submitNewsSearch">
               <label>
