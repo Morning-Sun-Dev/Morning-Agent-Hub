@@ -388,4 +388,46 @@ describe('ChatShell', () => {
     expect(urlMessage).toContain('https://example.com/report')
     expect(urlOptions.requestedCapabilities).toEqual(expect.arrayContaining(['web_search', 'url_fetch']))
   })
+
+  it('runs partial capability card actions without adding unrelated web search', async () => {
+    getCapabilities.mockResolvedValue([
+      {
+        agentId: 'internal_rag',
+        capabilityId: 'rag_sql_search',
+        label: '문서 메타데이터 검색',
+        description: '메타데이터 조건으로 문서를 검색합니다.',
+        enabled: true,
+        uiStatus: 'partial',
+        uiSurface: '기능 패널 요청 초안',
+      },
+      {
+        agentId: 'report_writing',
+        capabilityId: 'list_templates',
+        label: '보고서 양식 조회',
+        description: '사용 가능한 보고서 양식을 조회합니다.',
+        enabled: true,
+        uiStatus: 'partial',
+        uiSurface: '채팅 입력',
+      },
+    ])
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '기능').trigger('click')
+    await wrapper.findAll('[data-testid="capability-run-input"]').at(0).setValue('2026년 PDF 문서')
+    await wrapper.findAll('[data-testid="capability-run-button"]').at(0).trigger('click')
+
+    const [ragMessage, , , ragOptions] = streamChat.mock.calls.at(-1)
+    expect(ragMessage).toContain('2026년 PDF 문서')
+    expect(ragOptions.requestedCapabilities).toEqual(expect.arrayContaining(['rag_sql_search']))
+    expect(ragOptions.requestedCapabilities).not.toContain('web_search')
+
+    await wrapper.findAll('button').find((button) => button.text() === '기능').trigger('click')
+    await wrapper.findAll('[data-testid="capability-run-button"]').at(1).trigger('click')
+
+    const [templateMessage, , , templateOptions] = streamChat.mock.calls.at(-1)
+    expect(templateMessage).toContain('보고서 양식 목록')
+    expect(templateOptions.requestedCapabilities).toEqual(expect.arrayContaining(['list_templates']))
+    expect(templateOptions.requestedCapabilities).not.toContain('write_report')
+  })
 })

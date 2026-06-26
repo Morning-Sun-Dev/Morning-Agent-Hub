@@ -32,12 +32,14 @@ const expanded = ref(false)
 const folderName = ref('')
 const newsQuery = ref('')
 const urlValue = ref('')
+const capabilityValues = ref({})
 const showMobileSummary = computed(() => props.mobileCollapsed && !expanded.value)
 const itemCount = computed(() => (
   props.sources.length + props.files.length + props.folders.length + props.progress.length + props.capabilities.length
 ))
 const canRunNews = computed(() => Boolean(newsQuery.value.trim()) && !props.busy)
 const canRunUrl = computed(() => isHttpUrl(urlValue.value.trim()) && !props.busy)
+const noValueQuickRunCapabilities = new Set(['list_files', 'list_templates'])
 
 const tabs = [
   { id: 'sources', label: '출처' },
@@ -76,6 +78,43 @@ function submitUrlFetch() {
   const value = urlValue.value.trim()
   if (!isHttpUrl(value) || props.busy) return
   emit('run-capability', { capabilityId: 'url_fetch', value })
+}
+
+function capabilityPlaceholder(capability) {
+  const capabilityId = capability?.capabilityId
+  if (capabilityId === 'url_fetch') return 'https://example.com/report'
+  if (capabilityId === 'rag_index') return 'gdrive://file/abc123'
+  if (capabilityId === 'download_file' || capabilityId === 'get_file_info' || capabilityId === 'delete_file') {
+    return '파일 ID 또는 gdrive://file/...'
+  }
+  if (capabilityId === 'update_file') return '파일 ID와 변경할 이름 또는 내용'
+  if (capabilityId === 'find_folder' || capabilityId === 'create_folder') return '폴더명'
+  if (capabilityId === 'list_files') return '검색어 또는 폴더명 (선택)'
+  if (capabilityId === 'list_templates') return '입력 없이 실행 가능'
+  return '요청할 주제나 조건'
+}
+
+function updateCapabilityValue(capabilityId, event) {
+  capabilityValues.value = {
+    ...capabilityValues.value,
+    [capabilityId]: event.target.value,
+  }
+}
+
+function canRunCapability(capability) {
+  if (!capability?.enabled || props.busy) return false
+  const capabilityId = capability.capabilityId
+  if (noValueQuickRunCapabilities.has(capabilityId)) return true
+  return Boolean((capabilityValues.value[capabilityId] || '').trim())
+}
+
+function runCapability(capability) {
+  if (!canRunCapability(capability)) return
+  const capabilityId = capability.capabilityId
+  emit('run-capability', {
+    capabilityId,
+    value: (capabilityValues.value[capabilityId] || '').trim(),
+  })
 }
 
 function isHttpUrl(value) {
@@ -249,6 +288,24 @@ function isHttpUrl(value) {
               <span :data-status="capability.uiStatus">{{ statusLabel(capability.uiStatus) }}</span>
               <small v-if="capability.uiSurface">{{ capability.uiSurface }}</small>
             </footer>
+            <form class="capability-card-runner" @submit.prevent="runCapability(capability)">
+              <input
+                :value="capabilityValues[capability.capabilityId] || ''"
+                type="text"
+                :placeholder="capabilityPlaceholder(capability)"
+                :aria-label="`${capability.label} 실행 입력`"
+                data-testid="capability-run-input"
+                @input="updateCapabilityValue(capability.capabilityId, $event)"
+              >
+              <button
+                type="button"
+                data-testid="capability-run-button"
+                :disabled="!canRunCapability(capability)"
+                @click="runCapability(capability)"
+              >
+                실행
+              </button>
+            </form>
             <button
               type="button"
               class="capability-action"
@@ -432,6 +489,41 @@ p {
 }
 
 .capability-tool button:disabled {
+  color: var(--m001-muted);
+  cursor: not-allowed;
+}
+
+.capability-card-runner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.capability-card-runner input {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--m001-border);
+  border-radius: var(--m001-radius-control);
+  background: var(--m001-panel-subtle);
+  color: var(--m001-text);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 10px;
+}
+
+.capability-card-runner button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--m001-border-strong);
+  border-radius: var(--m001-radius-control);
+  background: white;
+  color: var(--m001-text);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.capability-card-runner button:disabled {
   color: var(--m001-muted);
   cursor: not-allowed;
 }
