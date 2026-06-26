@@ -125,8 +125,6 @@ def _infer_source_role(agent: str, instruction: str, user_query: str) -> SourceR
         return "content"
     if agent == "file_management" and has_format_hint:
         return "format"
-    if agent == "internal_rag" and has_format_hint:
-        return "format"
     return "content"
 
 
