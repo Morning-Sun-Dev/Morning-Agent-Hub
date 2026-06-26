@@ -343,4 +343,25 @@ describe('ChatShell', () => {
     const [, , , options] = streamChat.mock.calls.at(-1)
     expect(options.requestedCapabilities).toEqual(expect.arrayContaining(['delete_file']))
   })
+
+  it('runs web capability quick inputs with explicit requested capabilities', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '기능').trigger('click')
+    await wrapper.get('[data-testid="news-query-input"]').setValue('AI 에이전트 시장')
+    await wrapper.get('[data-testid="news-search-button"]').trigger('click')
+
+    const [newsMessage, , , newsOptions] = streamChat.mock.calls.at(-1)
+    expect(newsMessage).toContain('AI 에이전트 시장')
+    expect(newsOptions.requestedCapabilities).toEqual(expect.arrayContaining(['web_search', 'news_search']))
+
+    await wrapper.findAll('button').find((button) => button.text() === '기능').trigger('click')
+    await wrapper.get('[data-testid="url-fetch-input"]').setValue('https://example.com/report')
+    await wrapper.get('[data-testid="url-fetch-button"]').trigger('click')
+
+    const [urlMessage, , , urlOptions] = streamChat.mock.calls.at(-1)
+    expect(urlMessage).toContain('https://example.com/report')
+    expect(urlOptions.requestedCapabilities).toEqual(expect.arrayContaining(['web_search', 'url_fetch']))
+  })
 })
