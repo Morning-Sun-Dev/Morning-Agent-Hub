@@ -31,18 +31,20 @@
 | File Management | 10013 | Google Drive 파일 검색·읽기·업로드 |
 | Report Writing | 10014 | 양식 예시(`format_example`) 기반 보고서 작성 |
 
-### 워크플로우 예시
+## 작업 기준 문서
 
-```
-"AI 트렌드 조사 후 조사 보고서로 작성"
-  → web_research → report_writing
+팀원이 같은 기준으로 작업할 수 있도록 폴더별 `AGENTS.md`를 둡니다. Codex와 다른 코딩 에이전트는 가까운 `AGENTS.md`를 우선 참고하므로, 공통 규칙은 루트에 두고 세부 규칙은 담당 폴더에 둡니다.
 
-"test.txt 양식 참고해서 SQL 보고서 작성하고 Drive에 저장"
-  → file_management (test.txt 읽기)
-  → web_research (SQL 조사)
-  → report_writing (양식 mimic + SQL 본문)
-  → file_management (Drive 저장)
-```
+| 위치 | 용도 |
+|------|------|
+| `AGENTS.md` | 저장소 전체 작업 규칙, 검증, PR 기준 |
+| `ai_llm/AGENTS.md` | A2A 에이전트 공통 규칙 |
+| `ai_llm/*_agent/AGENTS.md` | 개별 에이전트 책임과 artifact 규칙 |
+| `backend/AGENTS.md` | FastAPI 라우트, 스키마, SSE 계약 |
+| `frontend/AGENTS.md` | Vue UI, API adapter, 화면 테스트 기준 |
+| `common/AGENTS.md` | 공유 계약 모델 변경 기준 |
+| `tests/AGENTS.md` | 회귀 테스트 배치와 실행 기준 |
+| `.github/AGENTS.md` | PR 템플릿, 이슈 템플릿, CI 변경 기준 |
 
 > `report_writing`은 upstream 완료 **후** 실행되어야 합니다. `plan_normalizer`가 `depends_on`을 자동 보정합니다.
 
@@ -154,7 +156,8 @@ python -m pytest ai_llm -v --tb=short
 ## 파일 구조
 
 ```
-CHAP11_final-project/
+Morning-Agent-Hub/
+├── AGENTS.md                    # 저장소 전체 작업 기준
 ├── README.md
 ├── requirements.txt
 ├── start_agents.py             # 에이전트 일괄 시작
