@@ -155,6 +155,16 @@ python test_client.py
 python -m pytest ai_llm -v --tb=short
 ```
 
+### 통합 Smoke
+
+백엔드와 에이전트들을 실행한 뒤 로컬 REST/SSE 계약을 한 번에 확인합니다.
+
+```bash
+python scripts/smoke_system.py
+python scripts/smoke_system.py --file ./sample.pdf
+python scripts/smoke_system.py --skip-chat --json
+```
+
 ## 파일 구조
 
 ```
