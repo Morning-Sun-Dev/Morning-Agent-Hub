@@ -10,6 +10,8 @@ This folder owns the Vue 3 frontend, API adapter, chat UI components, and fronte
 - Normalize backend responses in `frontend/src/api.js` and `frontend/src/models/chatModels.js`; avoid ad hoc response parsing inside components.
 - Do not duplicate backend or agent business logic in the UI.
 - The UI must expose message input, file attachment state, answer rendering, sources, generated/downloadable files, progress, and error recovery when backend data is available.
+- File Management UI behavior belongs in the chat evidence/file panel. Use `frontend/src/api.js` adapters for `/api/files`, `/api/files/{file_id}`, and `/api/files/{file_id}/download`; components should emit file actions instead of constructing route URLs directly.
+- Report template selection belongs in the composer flow. Load `/api/report-templates` through the API adapter, keep the user's visible draft clean, and add template instructions only to the transport request sent to the backend.
 - Render assistant answers as Markdown because the orchestrator uses Markdown to convey hierarchy, emphasis, links, tables, lists, and code.
 - Markdown rendering must be safe: do not execute raw HTML or script content, and keep external links/file links controlled by the normalized model.
 - Keep test-only placeholder components out of production routes once a real component exists.
