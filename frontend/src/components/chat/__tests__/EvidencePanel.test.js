@@ -189,6 +189,10 @@ describe('EvidencePanel', () => {
     const inputs = wrapper.findAll('[data-testid="capability-run-input"]')
     const buttons = wrapper.findAll('[data-testid="capability-run-button"]')
 
+    expect(inputs.at(0).attributes('placeholder')).toBe('예: 2026년 PDF 문서')
+    expect(wrapper.text()).toContain('메타데이터 조건')
+    expect(wrapper.text()).toContain('사용 가능한 보고서 양식 목록과 용도를 조회합니다.')
+
     await inputs.at(0).setValue('2026년 PDF 문서')
     await buttons.at(0).trigger('click')
     await buttons.at(1).trigger('click')
