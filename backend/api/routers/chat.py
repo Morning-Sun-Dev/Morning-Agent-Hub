@@ -143,15 +143,16 @@ def _answer_event_payload(chat_response: ChatResponse, session_id: str) -> dict:
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     session_id = await _ensure_session(req.session_id, req.message)
-    history = await _load_history(session_id)
-    prompt = _build_prompt(req, history)
+    # Keep prior chat history out of the orchestrator prompt so RAG queries stay
+    # focused on the current request, while still preserving explicit contract
+    # fields such as attachments and requested capabilities.
+    prompt = _build_prompt(req, "")
 
     await _save_message(session_id, "user", req.message)
 
     try:
         client = await get_a2a_client()
-        # 현재 질문만 전달 — 이력을 함께 보내면 RAG 벡터 검색 쿼리가 오염됨
-        response = await client.send_message("orchestrator", req.message)
+        response = await client.send_message("orchestrator", prompt)
 
         chat_response = build_chat_response(response, session_id=session_id)
 
@@ -182,7 +183,6 @@ async def chat_stream(
         try:
             # Supabase 작업을 스레드에서 실행
             resolved_id = await _ensure_session(session_id, message)
-            history = await _load_history(resolved_id)
             req = ChatRequest(
                 message=message,
                 session_id=resolved_id,
@@ -192,15 +192,16 @@ async def chat_stream(
                     "requested_capabilities",
                 ),
             )
-            prompt = _build_prompt(req, history)
+            # Keep chat history out of the orchestrator prompt, but retain
+            # explicit stream request metadata from the frontend contract.
+            prompt = _build_prompt(req, "")
 
             await _save_message(resolved_id, "user", message)
 
             yield _sse_data({"type": "status", "state": "working"})
 
             client = await get_a2a_client()
-            # 현재 질문만 전달 — 이력을 함께 보내면 RAG 벡터 검색 쿼리가 오염됨
-            response = await client.send_message("orchestrator", message)
+            response = await client.send_message("orchestrator", prompt)
 
             chat_response = build_chat_response(response, session_id=resolved_id)
 
