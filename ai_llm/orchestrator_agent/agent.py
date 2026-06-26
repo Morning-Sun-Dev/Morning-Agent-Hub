@@ -509,7 +509,7 @@ class OrchestratorAgent:
         else:
             # 그 외 멀티 에이전트 결과는 gpt-4o로 통합 요약
             raw = await self.generate_final_response(query, results)
-            final_response = "💭 **[AI 통합 답변]**\n\n" + raw
+            final_response = "> 💭 **AI 통합 답변**\n\n" + raw
 
         yield {
             "is_task_complete": True,
