@@ -46,8 +46,8 @@ describe('ChatShell', () => {
         label: 'Drive 파일 삭제',
         description: 'Google Drive 파일을 삭제합니다.',
         enabled: true,
-        uiStatus: 'planned',
-        uiSurface: '',
+        uiStatus: 'available',
+        uiSurface: '파일 패널',
       },
     ])
     getReportTemplates.mockResolvedValue([
@@ -111,7 +111,7 @@ describe('ChatShell', () => {
     expect(wrapper.text()).toContain('웹 검색')
     expect(wrapper.text()).toContain('채팅 입력')
     expect(wrapper.text()).toContain('Drive 파일 삭제')
-    expect(wrapper.text()).toContain('예정')
+    expect(wrapper.text()).toContain('파일 패널')
   })
 
   it('passes uploaded attachments and requested capabilities to the stream', async () => {
