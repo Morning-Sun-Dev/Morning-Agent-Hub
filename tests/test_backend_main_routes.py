@@ -62,42 +62,42 @@ def test_backend_main_exposes_capability_registry():
         item["agent_id"] == "file_management"
         and item["capability_id"] == "delete_file"
         and item["ui_status"] == "available"
-        and item["ui_surface"] == "파일 패널"
+        and "파일 패널" in item["ui_surface"]
         for item in payload
     )
     assert any(
         item["agent_id"] == "file_management"
         and item["capability_id"] == "list_files"
         and item["ui_status"] == "available"
-        and item["ui_surface"] == "파일 패널"
+        and "기능 패널 빠른 실행" in item["ui_surface"]
         for item in payload
     )
     assert any(
         item["agent_id"] == "file_management"
         and item["capability_id"] == "get_file_info"
         and item["ui_status"] == "available"
-        and item["ui_surface"] == "파일 패널"
+        and "파일 패널" in item["ui_surface"]
         for item in payload
     )
     assert any(
         item["agent_id"] == "file_management"
         and item["capability_id"] == "download_file"
-        and item["ui_status"] == "partial"
-        and item["ui_surface"] == "파일 패널"
+        and item["ui_status"] == "available"
+        and "기능 패널 빠른 실행" in item["ui_surface"]
         for item in payload
     )
     assert any(
         item["agent_id"] == "file_management"
         and item["capability_id"] == "find_folder"
         and item["ui_status"] == "available"
-        and item["ui_surface"] == "파일 패널"
+        and "파일 패널" in item["ui_surface"]
         for item in payload
     )
     assert any(
         item["agent_id"] == "file_management"
         and item["capability_id"] == "create_folder"
         and item["ui_status"] == "available"
-        and item["ui_surface"] == "파일 패널"
+        and "기능 패널 빠른 실행" in item["ui_surface"]
         for item in payload
     )
     assert any(
@@ -111,7 +111,7 @@ def test_backend_main_exposes_capability_registry():
         item["agent_id"] == "report_writing"
         and item["capability_id"] == "list_templates"
         and item["ui_status"] == "partial"
-        and item["ui_surface"] == "채팅 입력"
+        and "기능 패널 빠른 실행" in item["ui_surface"]
         for item in payload
     )
 

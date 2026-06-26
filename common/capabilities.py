@@ -18,7 +18,7 @@ _CAPABILITIES = [
         label="웹 검색",
         description="외부 웹에서 최신 정보와 출처를 검색합니다.",
         ui_status="available",
-        ui_surface="채팅 입력, 출처 패널",
+        ui_surface="채팅 입력, 기능 패널 빠른 실행, 출처 패널",
     ),
     CapabilityDescriptor(
         agent_id="web_research",
@@ -50,7 +50,7 @@ _CAPABILITIES = [
         label="문서 메타데이터 검색",
         description="문서 유형, 날짜 등 메타데이터 조건으로 사내 문서를 검색합니다.",
         ui_status="partial",
-        ui_surface="기능 패널 요청 초안",
+        ui_surface="기능 패널 요청 초안, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="internal_rag",
@@ -58,7 +58,7 @@ _CAPABILITIES = [
         label="문서 인덱싱",
         description="Drive 파일을 텍스트로 추출해 벡터 DB에 인덱싱합니다.",
         ui_status="partial",
-        ui_surface="파일 업로드",
+        ui_surface="파일 업로드, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="file_management",
@@ -66,15 +66,15 @@ _CAPABILITIES = [
         label="Drive 업로드",
         description="파일이나 생성된 문서를 Google Drive에 저장합니다.",
         ui_status="available",
-        ui_surface="파일 첨부, 파일 패널",
+        ui_surface="파일 첨부, 파일 패널, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="file_management",
         capability_id="download_file",
         label="Drive 다운로드",
         description="Google Drive 파일을 다운로드하거나 다운로드 링크를 제공합니다.",
-        ui_status="partial",
-        ui_surface="파일 패널",
+        ui_status="available",
+        ui_surface="파일 패널, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="file_management",
@@ -82,7 +82,7 @@ _CAPABILITIES = [
         label="파일 정보 조회",
         description="Drive 파일의 이름, 크기, MIME 타입, 링크 등 메타데이터를 조회합니다.",
         ui_status="available",
-        ui_surface="파일 패널",
+        ui_surface="파일 패널, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="file_management",
@@ -90,7 +90,7 @@ _CAPABILITIES = [
         label="Drive 폴더 조회",
         description="Google Drive에서 이름 기반으로 폴더를 찾습니다.",
         ui_status="available",
-        ui_surface="파일 패널",
+        ui_surface="파일 패널, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="file_management",
@@ -98,7 +98,7 @@ _CAPABILITIES = [
         label="Drive 파일 목록",
         description="Drive 파일 목록을 조회하고 검색어로 필터링합니다.",
         ui_status="available",
-        ui_surface="파일 패널",
+        ui_surface="파일 패널, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="file_management",
@@ -106,7 +106,7 @@ _CAPABILITIES = [
         label="Drive 파일 삭제",
         description="Google Drive 파일을 휴지통으로 이동하거나 삭제합니다.",
         ui_status="available",
-        ui_surface="파일 패널",
+        ui_surface="파일 패널, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="file_management",
@@ -114,7 +114,7 @@ _CAPABILITIES = [
         label="Drive 파일 업데이트",
         description="Drive 파일의 내용이나 이름을 갱신합니다.",
         ui_status="partial",
-        ui_surface="파일 패널 이름 변경, 기능 패널 요청 초안",
+        ui_surface="파일 패널 이름 변경, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="file_management",
@@ -122,7 +122,7 @@ _CAPABILITIES = [
         label="Drive 폴더 생성",
         description="Google Drive에 새 폴더를 생성합니다.",
         ui_status="available",
-        ui_surface="파일 패널",
+        ui_surface="파일 패널, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="report_writing",
@@ -130,7 +130,7 @@ _CAPABILITIES = [
         label="보고서 작성",
         description="수집된 정보를 보고서 Markdown으로 구조화합니다.",
         ui_status="partial",
-        ui_surface="채팅 입력, 답변 영역",
+        ui_surface="채팅 입력, 기능 패널 빠른 실행, 답변 영역",
     ),
     CapabilityDescriptor(
         agent_id="report_writing",
@@ -138,7 +138,7 @@ _CAPABILITIES = [
         label="보고서 양식 적용",
         description="executive_summary, research_report 등 지정 양식에 맞춰 내용을 정리합니다.",
         ui_status="partial",
-        ui_surface="채팅 입력",
+        ui_surface="채팅 입력, 기능 패널 빠른 실행",
     ),
     CapabilityDescriptor(
         agent_id="report_writing",
@@ -146,7 +146,7 @@ _CAPABILITIES = [
         label="보고서 양식 조회",
         description="사용 가능한 보고서 템플릿 목록과 구조를 조회합니다.",
         ui_status="partial",
-        ui_surface="채팅 입력",
+        ui_surface="채팅 입력, 기능 패널 빠른 실행",
     ),
 ]
 

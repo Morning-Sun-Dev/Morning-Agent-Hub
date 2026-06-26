@@ -100,26 +100,87 @@ function applyCapability(capability) {
 function runPanelCapability(payload = {}) {
   const capabilityId = payload.capabilityId
   const value = typeof payload.value === 'string' ? payload.value.trim() : ''
-  if (!capabilityId || !value || isBusy()) return
+  if (!capabilityId || isBusy()) return
 
   const text = capabilityRequestText(capabilityId, value)
   if (!text) return
 
+  const reportTemplate = selectedReportTemplate.value
+  const includeWebSearch = ['web_search', 'news_search', 'url_fetch'].includes(capabilityId)
   dispatchRequest({
     text,
     displayText: text,
     attachments: [],
-    capabilities: requestedCapabilities({ attachments: [], extraCapabilities: [capabilityId] }),
+    capabilities: requestedCapabilities({
+      includeWebSearch,
+      attachments: [],
+      reportTemplate,
+      extraCapabilities: [capabilityId],
+    }),
     preservedDraft: draft.value,
+    reportTemplate,
   })
 }
 
 function capabilityRequestText(capabilityId, value) {
+  const needsValue = !['list_files', 'list_templates'].includes(capabilityId)
+  if (needsValue && !value) return ''
+
+  if (capabilityId === 'route_request') {
+    return `다음 요청을 적절한 에이전트 실행 계획으로 분해해줘:\n${value}`
+  }
+  if (capabilityId === 'web_search') {
+    return `다음 주제의 최신 정보를 출처와 함께 검색해줘:\n${value}`
+  }
   if (capabilityId === 'news_search') {
     return `다음 주제의 최신 뉴스와 핵심 변화를 출처와 함께 요약해줘:\n${value}`
   }
   if (capabilityId === 'url_fetch') {
     return `다음 URL 내용을 가져와 핵심 내용을 요약해줘:\n${value}`
+  }
+  if (capabilityId === 'rag_vector_search') {
+    return `사내 문서에서 다음 주제와 관련된 근거를 찾아 답변해줘:\n${value}`
+  }
+  if (capabilityId === 'rag_sql_search') {
+    return `문서 유형, 날짜, 작성자 같은 메타데이터 조건으로 관련 문서를 찾아줘:\n${value}`
+  }
+  if (capabilityId === 'rag_index') {
+    return `다음 Drive 파일을 인덱싱하고 검색 가능 상태로 만들어줘:\n${value}`
+  }
+  if (capabilityId === 'upload_file') {
+    return `다음 내용을 Google Drive 파일로 저장해줘:\n${value}`
+  }
+  if (capabilityId === 'download_file') {
+    return `다음 Drive 파일을 다운로드 가능한 링크로 준비해줘:\n${value}`
+  }
+  if (capabilityId === 'get_file_info') {
+    return `다음 Drive 파일의 이름, 크기, 형식, 수정일 정보를 확인해줘:\n${value}`
+  }
+  if (capabilityId === 'find_folder') {
+    return `Google Drive에서 다음 폴더를 찾아줘:\n${value}`
+  }
+  if (capabilityId === 'list_files') {
+    return value
+      ? `Google Drive 파일 목록을 다음 조건으로 보여줘:\n${value}`
+      : 'Google Drive 파일 목록을 보여줘.'
+  }
+  if (capabilityId === 'delete_file') {
+    return `다음 Drive 파일을 휴지통으로 이동해줘:\n${value}`
+  }
+  if (capabilityId === 'update_file') {
+    return `다음 Drive 파일의 이름이나 내용을 업데이트해줘:\n${value}`
+  }
+  if (capabilityId === 'create_folder') {
+    return `Google Drive에 새 폴더를 만들어줘:\n${value}`
+  }
+  if (capabilityId === 'write_report') {
+    return `다음 내용을 Markdown 문서로 작성해줘:\n${value}`
+  }
+  if (capabilityId === 'format_report') {
+    return `다음 내용을 선택한 보고서 양식에 맞춰 정리해줘:\n${value}`
+  }
+  if (capabilityId === 'list_templates') {
+    return '사용 가능한 보고서 양식 목록과 각 용도를 알려줘.'
   }
   return ''
 }

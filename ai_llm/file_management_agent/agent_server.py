@@ -35,9 +35,9 @@ def create_agent_card() -> AgentCard:
     )
 
     download_skill = AgentSkill(
-        id='download_file_as_base64',
-        name='파일 다운로드 (Base64)',
-        description='Google Drive에서 파일을 다운로드하여 Base64로 인코딩하여 반환합니다.',
+        id='download_file',
+        name='파일 다운로드',
+        description='Google Drive에서 파일을 다운로드하거나 다운로드 가능한 응답으로 준비합니다.',
         tags=['download', 'file', 'read', 'get', 'base64'],
         examples=[
             '문서 다운로드해서 내용 알려줘',

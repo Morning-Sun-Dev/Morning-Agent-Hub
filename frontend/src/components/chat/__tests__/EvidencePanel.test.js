@@ -155,4 +155,47 @@ describe('EvidencePanel', () => {
       [{ capabilityId: 'url_fetch', value: 'https://example.com/report' }],
     ])
   })
+
+  it('emits card-level capability quick runs for partial capabilities', async () => {
+    const wrapper = mount(EvidencePanel, {
+      props: {
+        sources: [],
+        files: [],
+        progress: [],
+        capabilities: [
+          {
+            agentId: 'internal_rag',
+            capabilityId: 'rag_sql_search',
+            label: '문서 메타데이터 검색',
+            description: '메타데이터 조건으로 문서를 검색합니다.',
+            enabled: true,
+            uiStatus: 'partial',
+            uiSurface: '기능 패널 요청 초안',
+          },
+          {
+            agentId: 'report_writing',
+            capabilityId: 'list_templates',
+            label: '보고서 양식 조회',
+            description: '사용 가능한 보고서 양식을 조회합니다.',
+            enabled: true,
+            uiStatus: 'partial',
+            uiSurface: '채팅 입력',
+          },
+        ],
+        activeTab: 'capabilities',
+      },
+    })
+
+    const inputs = wrapper.findAll('[data-testid="capability-run-input"]')
+    const buttons = wrapper.findAll('[data-testid="capability-run-button"]')
+
+    await inputs.at(0).setValue('2026년 PDF 문서')
+    await buttons.at(0).trigger('click')
+    await buttons.at(1).trigger('click')
+
+    expect(wrapper.emitted('run-capability')).toEqual([
+      [{ capabilityId: 'rag_sql_search', value: '2026년 PDF 문서' }],
+      [{ capabilityId: 'list_templates', value: '' }],
+    ])
+  })
 })
