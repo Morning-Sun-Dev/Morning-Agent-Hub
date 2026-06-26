@@ -81,6 +81,33 @@ describe('EvidencePanel', () => {
     expect(wrapper.emitted('delete-file')).toEqual([['drive-file-1']])
   })
 
+  it('shows file metadata after detail lookup updates the file row', () => {
+    const wrapper = mount(EvidencePanel, {
+      props: {
+        sources: [],
+        files: [{
+          id: 'gdrive://file/a',
+          fileId: 'drive-file-1',
+          kind: 'drive',
+          name: 'brief.md',
+          mimeType: 'text/markdown',
+          size: 2048,
+          status: 'ready',
+          storageRef: 'gdrive://file/a',
+          detailChecked: true,
+        }],
+        progress: [],
+        activeTab: 'files',
+      },
+    })
+
+    const metadata = wrapper.get('[data-testid="file-metadata"]').text()
+    expect(metadata).toContain('파일 ID')
+    expect(metadata).toContain('drive-file-1')
+    expect(metadata).toContain('text/markdown')
+    expect(metadata).toContain('2.0 KB')
+  })
+
   it('emits folder search and create actions from the file panel', async () => {
     const wrapper = mount(EvidencePanel, {
       props: {

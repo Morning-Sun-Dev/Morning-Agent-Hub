@@ -79,6 +79,9 @@ describe('ChatShell', () => {
       fileId: 'drive-file-1',
       name: 'brief.md',
       detail: 'text/markdown',
+      mimeType: 'text/markdown',
+      size: 2048,
+      modifiedAt: '2026-06-26T06:30:00Z',
     })
     getFileDownloadAction.mockResolvedValue({
       available: true,
@@ -292,6 +295,8 @@ describe('ChatShell', () => {
     await wrapper.get('[data-testid="file-info-button"]').trigger('click')
     expect(getFileInfo).toHaveBeenCalledWith('drive-file-1')
     expect(wrapper.text()).toContain('brief.md 상세 정보를 확인했습니다.')
+    expect(wrapper.get('[data-testid="file-metadata"]').text()).toContain('text/markdown')
+    expect(wrapper.get('[data-testid="file-metadata"]').text()).toContain('2.0 KB')
 
     await wrapper.get('[data-testid="file-download-button"]').trigger('click')
     expect(getFileDownloadAction).toHaveBeenCalledWith('drive-file-1')
