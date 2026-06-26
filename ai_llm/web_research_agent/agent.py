@@ -26,23 +26,44 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 SYSTEM_PROMPT = """당신은 웹 검색 전문가입니다.
 
-tavily_search 도구 사용 시 주의사항:
-- topic 파라미터는 반드시 'general', 'news', 'finance' 중 하나만 사용하세요.
-- 기술, AI, 프로그래밍 관련 질문도 topic='general'을 사용하세요.
-- 최신 뉴스 검색 시에만 topic='news'를 사용하세요.
-- 금융/주식 관련 검색 시에만 topic='finance'를 사용하세요.
+필수 규칙:
+- 모든 질문에 답하기 전에 반드시 tavily_search 도구를 1회 이상 호출하세요.
+- 질문과 동일한 언어로 답변하세요 (한국어 질문 → 한국어 답변).
 
-검색 후 반드시 다음을 포함하세요:
+tavily_search 도구 사용 시:
+- topic 파라미터는 'general', 'news', 'finance' 중 하나만 사용
+- 기술/AI 질문 → topic='general'
+- 최신 뉴스 → topic='news'
+- 금융/주식 → topic='finance'
+
+검색 후 반드시 포함:
 - 핵심 내용 요약
 - 신뢰할 수 있는 출처 링크
 """
 
 
+def _is_tool_result_message(msg) -> bool:
+    """LangGraph/LangChain tool 응답 메시지 판별"""
+    msg_type = getattr(msg, "type", None)
+    if msg_type == "tool":
+        return True
+    class_name = type(msg).__name__
+    if class_name == "ToolMessage":
+        return True
+    name = getattr(msg, "name", None)
+    if name and not getattr(msg, "tool_calls", None):
+        if class_name not in ("AIMessage", "HumanMessage", "SystemMessage"):
+            return True
+    return False
+
+
 def extract_sources(tool_messages) -> List[WebSource]:
     """Tavily 도구 응답에서 WebSource 목록 추출"""
     sources = []
+    seen_urls: set[str] = set()
+
     for msg in tool_messages:
-        if not hasattr(msg, 'content') or not msg.content:
+        if not hasattr(msg, "content") or not msg.content:
             continue
         try:
             raw = msg.content
@@ -59,9 +80,13 @@ def extract_sources(tool_messages) -> List[WebSource]:
 
             for item in results:
                 if isinstance(item, dict) and "url" in item:
+                    url = item["url"]
+                    if url in seen_urls:
+                        continue
+                    seen_urls.add(url)
                     sources.append(WebSource(
                         title=item.get("title", ""),
-                        url=item.get("url", ""),
+                        url=url,
                         snippet=item.get("content", item.get("snippet")),
                         score=item.get("score"),
                     ))
@@ -124,10 +149,13 @@ class WebResearchAgent:
                     messages = node_output.get("messages", [])
 
                     for msg in messages:
-                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        if hasattr(msg, "tool_calls") and msg.tool_calls:
                             if not tool_called:
                                 tool_called = True
-                                tool_names = [tc.get('name', 'unknown') for tc in msg.tool_calls]
+                                tool_names = [
+                                    tc.get("name", "unknown") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                                    for tc in msg.tool_calls
+                                ]
                                 yield {
                                     "is_task_complete": False,
                                     "require_user_input": False,
@@ -135,15 +163,20 @@ class WebResearchAgent:
                                     "sources": [],
                                 }
 
-                        if hasattr(msg, 'name') and msg.name == 'tavily_search':
+                        if _is_tool_result_message(msg):
                             tool_messages.append(msg)
+                            logger.debug(
+                                f"[WEB AGENT] tool result: name={getattr(msg, 'name', None)}, "
+                                f"type={getattr(msg, 'type', None)}"
+                            )
 
-                        if hasattr(msg, 'content') and msg.content:
-                            if not (hasattr(msg, 'tool_calls') and msg.tool_calls):
-                                if not hasattr(msg, 'name') or not msg.name:
+                        if hasattr(msg, "content") and msg.content:
+                            if not (hasattr(msg, "tool_calls") and msg.tool_calls):
+                                if not _is_tool_result_message(msg):
                                     final_message = msg.content
 
             sources = extract_sources(tool_messages)
+            logger.info(f"[WEB AGENT] sources 추출: {len(sources)}개")
 
             if final_message:
                 yield {
@@ -187,7 +220,7 @@ if __name__ == "__main__":
             else:
                 print(f"\n💬 {content}")
                 if sources:
-                    print(f"\n📎 출처:")
+                    print(f"\n📎 출처 ({len(sources)}개):")
                     for s in sources:
                         print(f"  - {s['title']}: {s['url']}")
 

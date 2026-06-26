@@ -69,7 +69,8 @@ class FileManagementAgentExecutor(AgentExecutor):
                     )
                     break
                 elif is_complete:
-                    data = item.get('data') # [ 5 ]
+                    data = item.get('data')
+                    file_content = item.get('file_content')
 
                     if data and 'files' in data:
                         await updater.add_artifact(
@@ -77,6 +78,16 @@ class FileManagementAgentExecutor(AgentExecutor):
                             name='file_list'
                         )
                         logger.info(f"[FILE AGENT] [EXECUTOR] 파일 목록 DataPart 추가: {len(data.get('files', []))}개")
+
+                    if file_content and file_content.get('content'):
+                        await updater.add_artifact(
+                            parts=[Part(root=DataPart(data=file_content))],
+                            name='file_content',
+                        )
+                        logger.info(
+                            f"[FILE AGENT] [EXECUTOR] file_content 추가: "
+                            f"{file_content.get('filename')} ({len(file_content.get('content', ''))} chars)"
+                        )
 
                     await updater.add_artifact(
                         parts=[Part(root=TextPart(text=content))],

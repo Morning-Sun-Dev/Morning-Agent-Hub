@@ -17,6 +17,16 @@ from templates import (
     format_template_for_prompt,
 )
 
+AI_LLM = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if AI_LLM not in sys.path:
+    sys.path.insert(0, AI_LLM)
+
+from shared.report_context import (
+    ReportContext,
+    parse_report_context,
+    detect_template_id,
+)
+
 logger = logging.getLogger(__name__)
 
 if sys.platform.startswith("win"):
@@ -24,19 +34,27 @@ if sys.platform.startswith("win"):
 
 load_dotenv()
 
-SYSTEM_PROMPT = """당신은 전문 보고서 작성 에이전트입니다.
+FORMAT_MIMIC_PROMPT = """당신은 **양식 복제** 전문가입니다.
 
-역할:
-1. 사용자 요청과 제공된 자료(이전 에이전트 결과 포함)를 분석합니다.
-2. 지정된 보고서 양식(템플릿)에 맞춰 구조화된 보고서를 작성합니다.
-3. 마크다운 형식으로 작성하며, 각 섹션은 ## 헤더로 구분합니다.
+사용자가 [양식 예시] 전체 문서를 제공합니다. 당신의 유일한 임무:
+→ 예시와 **거의 동일한 markdown 골격**으로, 주제만 바꿔 새 문서 작성.
 
-작성 원칙:
-- 제공된 자료의 사실만 사용하고, 없는 내용은 추측하지 마세요.
-- 자료가 부족하면 해당 섹션에 "제공된 자료 부족"을 명시하세요.
-- 한국어로 작성하며, 전문적이고 명확한 문체를 사용하세요.
-- 표, bullet point, 번호 목록을 적절히 활용하세요.
-- 참고 자료 섹션이 있으면 출처를 명시하세요.
+반드시 지킬 것:
+- 예시의 **섹션 제목 문자열**을 그대로 유지 (예: `- **학습 내용:**`, `- **나의 한 줄 평:**`)
+- 예시의 **💡** 구분 위치·개수 유지
+- 예시의 bullet 깊이·`- **제목:**` 패턴 유지
+
+절대 금지 (예시에 없는 구조 추가):
+- "문서 구조", "서론/본론/결론", "목적/배경/방법론"
+- "프롬프트 제공", "질문 예시/답변" 챗봇 형식
+- "SQL에 대한 기본 이해", "전달 및 표현" 등 새로운 대분류
+
+본문 내용만 조사 자료 + 보고서 주제로 교체. LangChain/RAG 등 예시 주제 문장 복사 금지.
+"""
+
+SYSTEM_PROMPT = """당신은 보고서 작성 에이전트입니다.
+양식 예시가 없으면 지정된 내장 템플릿을 따릅니다.
+조사·검색을 새로 수행하지 않습니다.
 """
 
 
@@ -61,14 +79,15 @@ def get_report_template(template_id: str) -> str:
 
 class ReportWritingAgent:
     """
-    보고서 작성 에이전트
+    보고서 작성 에이전트 — 양식 적용·마크다운 작성 전담
 
-    다른 에이전트(web_research, internal_rag 등)에서 수집한 데이터를
-    지정된 양식에 맞춰 구조화된 보고서로 작성합니다.
+    Orchestrator가 전달한 ReportContext(구조화된 upstream 취합 결과)를
+    지정된 템플릿에 맞춰 보고서로 변환합니다.
     """
 
     def __init__(self):
         self.model = ChatOpenAI(model="gpt-4o", temperature=0.3)
+        self.model_format = ChatOpenAI(model="gpt-4o", temperature=0)
         self.initialized = False
 
     async def initialize(self) -> None:
@@ -79,78 +98,104 @@ class ReportWritingAgent:
         self.initialized = True
         logger.info("[REPORT AGENT] [INIT] 초기화 완료")
 
-    def _extract_source_data(self, query: str) -> tuple[str, str]:
-        """쿼리에서 원본 요청과 이전 에이전트 결과를 분리"""
+    def _parse_input(self, query: str) -> tuple[str, str, str, str, str, str, str]:
+        """
+        입력 파싱 → (instruction, content_text, template_id, language,
+                      report_topic, format_example, legacy_source_text)
+        """
+        ctx = parse_report_context(query)
+        if ctx:
+            format_example = ctx.get_format_example()
+            content_text = ctx.get_content_text()
+            logger.info(
+                f"[REPORT AGENT] ReportContext 수신: template={ctx.template_id}, "
+                f"topic={ctx.report_topic or '(없음)'}, "
+                f"format_example={'yes (' + str(len(format_example)) + ' chars)' if format_example else 'no'}, "
+                f"sources={len(ctx.sources)}"
+            )
+            return (
+                ctx.instruction,
+                content_text,
+                ctx.template_id,
+                ctx.language,
+                ctx.report_topic,
+                format_example,
+                ctx.to_source_text(),
+            )
+
         source_marker = "[이전 에이전트 결과]"
         if source_marker in query:
             parts = query.split(source_marker, 1)
-            user_request = parts[0].strip()
-            source_data = parts[1].strip() if len(parts) > 1 else ""
-            return user_request, source_data
-        return query.strip(), ""
+            instruction = parts[0].strip()
+            source_data = parts[1].strip().lstrip(":").strip() if len(parts) > 1 else ""
+            return instruction, source_data, detect_template_id(query), "ko", "", "", source_data
 
-    def _detect_template_id(self, query: str) -> str:
-        """쿼리에서 보고서 양식 ID 추출 또는 자동 감지"""
-        explicit_match = re.search(
-            r"(executive_summary|research_report|technical_report|meeting_minutes|general)",
-            query,
-            re.IGNORECASE,
-        )
-        if explicit_match:
-            return explicit_match.group(1).lower()
+        return query.strip(), "", detect_template_id(query), "ko", "", "", ""
 
-        template_keywords = {
-            "임원": "executive_summary",
-            "executive": "executive_summary",
-            "조사": "research_report",
-            "리서치": "research_report",
-            "research": "research_report",
-            "트렌드": "research_report",
-            "기술": "technical_report",
-            "technical": "technical_report",
-            "아키텍처": "technical_report",
-            "회의": "meeting_minutes",
-            "회의록": "meeting_minutes",
-            "minutes": "meeting_minutes",
-        }
-        query_lower = query.lower()
-        for keyword, template_id in template_keywords.items():
-            if keyword in query_lower:
-                return template_id
-
-        return detect_template_from_query(query)
-
-    async def _generate_title(self, user_request: str, template: Dict) -> str:
-        """보고서 제목 생성"""
-        response = await self.model.ainvoke([
-            {"role": "system", "content": "보고서 제목만 한 줄로 생성하세요. 따옴표 없이 제목만 출력하세요."},
-            {"role": "user", "content": f"요청: {user_request}\n양식: {template['name']}"},
-        ])
-        return response.content.strip().strip('"').strip("'")
-
-    async def _write_report(
+    async def _write_report_from_format_example(
         self,
-        user_request: str,
-        source_data: str,
+        format_example: str,
+        content_text: str,
+        report_topic: str,
+        language: str,
+    ) -> str:
+        """양식 예시 전문 + 조사 자료 → 동일 형식으로 새 보고서 작성"""
+        lang_label = "한국어" if language == "ko" else language
+        topic_line = report_topic or "사용자 지정 주제"
+
+        user_content = f"""## 작업
+[양식 예시]와 **동일한 markdown 골격**으로, 주제 **{topic_line}** 보고서를 작성하세요.
+
+## 조사 자료 (각 bullet 본문에만 사용)
+{content_text if content_text else "제공된 조사 자료 없음 — 해당 bullet에 '제공된 자료 부족' 표기"}
+
+## 작성 언어
+{lang_label}
+
+---
+
+## [양식 예시] — 이 문서의 **제목·순서·형식을 그대로 복제** (내용만 SQL로 교체)
+
+{format_example}
+
+---
+
+출력은 [양식 예시]와 같은 섹션 제목(`- **학습 내용:**`, `💡`, `- **나의 한 줄 평:**` 등)을 유지해야 합니다.
+서론/본론/결론, 문서 구조, 프롬프트 제공 형식은 **사용 금지**.
+"""
+
+        response = await self.model_format.ainvoke([
+            {"role": "system", "content": FORMAT_MIMIC_PROMPT},
+            {"role": "user", "content": user_content},
+        ])
+        return response.content
+
+    async def _write_report_from_template(
+        self,
+        content_text: str,
         template: Dict,
         title: str,
+        language: str,
+        report_topic: str = "",
     ) -> str:
-        """LLM으로 보고서 본문 생성"""
+        """내장 템플릿 기반 작성 (양식 예시 없을 때)"""
         template_spec = format_template_for_prompt(template)
+        lang_label = "한국어" if language == "ko" else language
+        topic_line = f"\n## 보고서 주제\n{report_topic}\n" if report_topic else ""
 
-        user_content = f"""## 보고서 작성 요청
-{user_request}
-
-## 사용할 양식
+        user_content = f"""## 사용할 양식
 {template_spec}
-
+{topic_line}
 ## 보고서 제목
 {title}
 
-## 참고 자료 (이전 에이전트/사용자 제공 데이터)
-{source_data if source_data else "별도 자료 없음 - 요청 내용만으로 작성"}
+## 작성 언어
+{lang_label}
 
-위 양식의 모든 섹션을 포함하여 완성된 마크다운 보고서를 작성하세요.
+## 참고 자료
+{content_text if content_text else "제공된 자료 없음 — 각 섹션에 '제공된 자료 부족' 표기"}
+
+위 참고 자료만을 기준으로 양식의 모든 섹션을 작성하세요.
 보고서 맨 위에 # {title} 형태로 제목을 넣으세요.
 """
 
@@ -159,6 +204,64 @@ class ReportWritingAgent:
             {"role": "user", "content": user_content},
         ])
         return response.content
+
+    async def _generate_title(
+        self,
+        source_data: str,
+        template: Dict,
+        language: str,
+        report_topic: str = "",
+    ) -> str:
+        """참고 자료 기반 보고서 제목 생성"""
+        lang_label = "한국어" if language == "ko" else language
+        if report_topic:
+            user_content = (
+                f"보고서 주제: {report_topic}\n"
+                f"양식: {template['name']}\n"
+                f"작성 언어: {lang_label}\n\n"
+                f"위 주제에 맞는 보고서 제목을 작성하세요."
+            )
+            system_content = (
+                f"보고서 제목만 {lang_label}로 한 줄 작성. 따옴표 없이 제목만 출력. "
+                f"주제는 반드시 '{report_topic}'와 일치해야 합니다. 양식 참고 자료의 다른 주제 사용 금지."
+            )
+        elif source_data:
+            user_content = (
+                f"양식: {template['name']}\n"
+                f"작성 언어: {lang_label}\n\n"
+                f"참고 자료:\n{source_data[:4000]}\n\n"
+                "위 참고 자료의 주제를 반영한 보고서 제목을 작성하세요."
+            )
+            system_content = (
+                f"보고서 제목만 {lang_label}로 한 줄 작성. 따옴표 없이 제목만 출력. "
+                "참고 자료 주제와 반드시 일치. 자료에 없는 새 주제 금지."
+            )
+        else:
+            user_content = f"양식: {template['name']}"
+            system_content = f"보고서 제목만 {lang_label}로 한 줄 작성."
+
+        response = await self.model.ainvoke([
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ])
+        return response.content.strip().strip('"').strip("'")
+
+    async def _write_report(
+        self,
+        content_text: str,
+        template: Dict,
+        title: str,
+        language: str,
+        report_topic: str = "",
+        format_example: str = "",
+    ) -> str:
+        if format_example:
+            return await self._write_report_from_format_example(
+                format_example, content_text, report_topic, language
+            )
+        return await self._write_report_from_template(
+            content_text, template, title, language, report_topic
+        )
 
     async def stream(self, query: str) -> AsyncIterator[Dict[str, Any]]:
         if not self.initialized:
@@ -171,20 +274,41 @@ class ReportWritingAgent:
                 "content": "📋 보고서 요청을 분석하고 있습니다...",
             }
 
-            user_request, source_data = self._extract_source_data(query)
-            template_id = self._detect_template_id(query)
+            instruction, content_text, template_id, language, report_topic, format_example, _ = (
+                self._parse_input(query)
+            )
             template = get_template(template_id)
 
+            mode = "양식 예시 따라 작성" if format_example else template["name"]
             yield {
                 "is_task_complete": False,
                 "require_user_input": False,
-                "content": f"📝 '{template['name']}' 양식으로 보고서를 작성 중...",
+                "content": f"📝 {mode} 중..."
+                + (f" (주제: {report_topic})" if report_topic else ""),
             }
 
-            title = await self._generate_title(user_request, template)
-            report_content = await self._write_report(
-                user_request, source_data, template, title
-            )
+            if not content_text and not format_example:
+                logger.warning("[REPORT AGENT] 참고 자료 없음 — 품질 저하 가능")
+            elif format_example and not content_text:
+                logger.warning("[REPORT AGENT] 양식은 있으나 조사(content) 자료 없음")
+            elif not format_example:
+                logger.warning(
+                    "[REPORT AGENT] format_example 없음 — test.txt 미전달. "
+                    "내장 템플릿으로 작성됩니다 (양식 불일치 가능)"
+                )
+
+            if format_example:
+                title = report_topic or "보고서"
+                report_content = await self._write_report(
+                    content_text, template, title, language, report_topic, format_example
+                )
+            else:
+                if not content_text:
+                    logger.warning("[REPORT AGENT] 본문(content) 소스 없음")
+                title = await self._generate_title(content_text, template, language, report_topic)
+                report_content = await self._write_report(
+                    content_text, template, title, language, report_topic, ""
+                )
 
             filename_suggestion = re.sub(r'[^\w\s가-힣-]', '', title)
             filename_suggestion = filename_suggestion.replace(" ", "_")[:50] + ".md"
@@ -196,7 +320,8 @@ class ReportWritingAgent:
                 "format": "markdown",
                 "filename_suggestion": filename_suggestion,
                 "sections": [s["title"] for s in template["sections"]],
-                "has_source_data": bool(source_data),
+                "has_source_data": bool(content_text),
+                "has_format_example": bool(format_example),
             }
 
             yield {
@@ -217,25 +342,29 @@ class ReportWritingAgent:
 
 if __name__ == "__main__":
     async def test():
+        from shared.report_context import ReportContext, SourceReference, serialize_report_context
+
         print("=" * 60)
-        print("Report Writing Agent 테스트")
+        print("Report Writing Agent 테스트 (ReportContext)")
         print("=" * 60)
+
+        ctx = ReportContext(
+            template_id="research_report",
+            language="ko",
+            instruction="조사 결과를 research_report 양식으로 작성해줘",
+            sources=[
+                SourceReference(
+                    agent="web_research",
+                    summary="2026년 AI 에이전트 트렌드: 멀티 에이전트, MCP, RAG+Agent 결합",
+                    references=[
+                        {"title": "AI Trends 2026", "url": "https://example.com", "snippet": "..."},
+                    ],
+                ),
+            ],
+        )
+        query = serialize_report_context(ctx)
 
         agent = ReportWritingAgent()
-        query = """2026년 AI 에이전트 트렌드에 대한 조사 보고서를 작성해줘.
-
-[이전 에이전트 결과]:
-2026년 AI 에이전트 주요 트렌드:
-1. 멀티 에이전트 오케스트레이션 - A2A 프로토콜 기반 에이전트 간 협업
-2. MCP(Model Context Protocol) - 도구 연동 표준화
-3. RAG + Agent 결합 - 사내 문서 기반 지능형 에이전트
-4. 자율 에이전트(Autonomous Agents) - 장기 작업 자동 수행
-출처: Tavily 웹 검색 (2026년 1월)
-"""
-
-        print(f"\nQuery: {query[:80]}...")
-        print("-" * 60)
-
         async for chunk in agent.stream(query):
             if chunk.get("is_task_complete"):
                 print(f"\n{chunk['content'][:500]}...")

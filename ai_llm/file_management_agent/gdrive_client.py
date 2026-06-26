@@ -404,7 +404,51 @@ class GoogleDriveClient:
         except HttpError as e:
             raise Exception(f"파일 업데이트 실패: {e}")
 
-    def read_file_content(self, file_id: str, max_chars: int = 5000) -> Optional[Dict[str, Any]]:
+    def download_file(self, file_id: str) -> Optional[bytes]:
+        """파일 바이트 다운로드 (Google Docs → text/plain export)"""
+        if not self.initialized:
+            self.initialize()
+
+        file_id = self.parse_storage_ref(file_id)
+
+        try:
+            info = self.service.files().get(
+                fileId=file_id,
+                fields="id, name, mimeType, size",
+            ).execute()
+
+            mime_type = info["mimeType"]
+            logger.info(f"[GDRIVE CLIENT] [DOWNLOAD] {info['name']} ({mime_type})")
+
+            google_export_mapping = {
+                "application/vnd.google-apps.document": "text/plain",
+                "application/vnd.google-apps.spreadsheet": "text/csv",
+                "application/vnd.google-apps.presentation": "text/plain",
+            }
+
+            if mime_type in google_export_mapping:
+                export_mime = google_export_mapping[mime_type]
+                request = self.service.files().export_media(
+                    fileId=file_id, mimeType=export_mime
+                )
+            else:
+                request = self.service.files().get_media(fileId=file_id)
+
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+
+            content = buffer.getvalue()
+            logger.info(f"[GDRIVE CLIENT] [DOWNLOAD] 완료: {len(content)} bytes")
+            return content
+        except HttpError as e:
+            if e.resp.status == 404:
+                return None
+            raise Exception(f"파일 다운로드 실패: {e}")
+
+    def read_file_content(self, file_id: str, max_chars: int = 15000) -> Optional[Dict[str, Any]]:
         """
         텍스트 파일 내용 읽기
 
@@ -446,6 +490,64 @@ class GoogleDriveClient:
             if e.resp.status == 404:
                 return None
             raise Exception(f"파일 내용 읽기 실패: {e}")
+
+    def search_files_by_name(self, filename: str, page_size: int = 10) -> List[Dict[str, Any]]:
+        """Drive 전체에서 파일명 검색 (앱 폴더 제한 없음)"""
+        if not self.initialized:
+            self.initialize()
+
+        safe = filename.replace("'", "\\'")
+        queries = [
+            f"name = '{safe}' and trashed=false",
+            f"name contains '{safe}' and trashed=false",
+        ]
+        seen_ids: set[str] = set()
+        found: List[Dict[str, Any]] = []
+
+        for q in queries:
+            try:
+                results = self.service.files().list(
+                    q=q,
+                    pageSize=page_size,
+                    fields="files(id, name, mimeType, size, createdTime, modifiedTime, webViewLink)",
+                ).execute()
+                for f in results.get("files", []):
+                    fid = f.get("id")
+                    if not fid or fid in seen_ids:
+                        continue
+                    seen_ids.add(fid)
+                    found.append({
+                        "file_id": fid,
+                        "storage_ref": self.create_storage_ref(fid),
+                        "filename": f.get("name"),
+                        "mime_type": f.get("mimeType"),
+                        "size": int(f.get("size", 0)),
+                        "created_at": f.get("createdTime"),
+                        "updated_at": f.get("modifiedTime"),
+                        "web_view_link": f.get("webViewLink"),
+                    })
+            except HttpError as e:
+                logger.warning(f"Drive 파일명 검색 실패 ({q}): {e}")
+
+        found.sort(key=lambda x: (0 if x["filename"] == filename else 1, x["filename"] or ""))
+        return found
+
+    def find_and_read_by_name(self, filename: str, max_chars: int = 15000) -> Optional[Dict[str, Any]]:
+        """파일명으로 검색 후 텍스트 내용 읽기"""
+        files = self.search_files_by_name(filename)
+        if not files:
+            logger.warning(f"[GDRIVE CLIENT] 파일명 검색 결과 없음: {filename}")
+            return None
+
+        logger.info(f"[GDRIVE CLIENT] '{filename}' 검색 {len(files)}건 — 읽기 시도")
+        for f in files:
+            result = self.read_file_content(f["file_id"], max_chars=max_chars)
+            if result:
+                result["file_id"] = f["file_id"]
+                result["storage_ref"] = f["storage_ref"]
+                return result
+            logger.warning(f"[GDRIVE CLIENT] 읽기 실패: {f.get('filename')} ({f.get('file_id')})")
+        return None
 
     def download_file_as_base64(self, file_id: str) -> Optional[Dict[str, Any]]:
         """

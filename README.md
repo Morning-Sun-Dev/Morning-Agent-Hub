@@ -4,19 +4,19 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│              사용자 (CLI / FastAPI Backend / test_client.py)             │
+│         사용자 (Vue Frontend / FastAPI Backend / test_client.py)         │
 └─────────────────────────────────────┬───────────────────────────────────┘
-                                      │ A2A Request / REST API
+                                      │ REST / A2A
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    Orchestrator Agent (Port: 10010)                      │
-│  • Intent 분석 (LLM)  • Plan 생성  • A2A Client로 Remote Agent 호출      │
-│  • 병렬/순차 실행  • 실행 Trace 추적                                      │
+│  • Intent 분석 · Plan 생성 · plan_normalizer (depends_on 자동 보정)       │
+│  • upstream 결과 → ReportContext 취합 · A2A Remote Agent 호출             │
 └─────────────────────────────────────┬───────────────────────────────────┘
                                       │ A2A Protocol
           ┌───────────┬───────────┬───┴───┬───────────┐
           ▼           ▼           ▼       ▼           ▼
-   Web Research  Internal RAG  File Mgmt  Report    (Infrastructure)
+   Web Research  Internal RAG  File Mgmt  Report
    (Port:10011)  (Port:10012)  (Port:10013) Writing
                                               (Port:10014)
 ```
@@ -25,38 +25,38 @@
 
 | 에이전트 | 포트 | 역할 |
 |---------|------|------|
-| Orchestrator | 10010 | Intent 분석, 플랜 생성, 에이전트 조율, 실행 Trace |
-| Web Research | 10011 | Tavily MCP 기반 웹/뉴스 검색, 출처 추출 |
-| Internal RAG | 10012 | Supabase pgvector 기반 사내 문서 검색/인덱싱 |
-| File Management | 10013 | Google Drive 파일 관리 |
-| **Report Writing** | **10014** | **양식 기반 보고서 작성 (FastAPI)** |
+| Orchestrator | 10010 | Intent 분석, 플랜 생성·실행, ReportContext 취합, Trace |
+| Web Research | 10011 | Tavily MCP 웹/뉴스 검색, 출처 추출 |
+| Internal RAG | 10012 | Supabase pgvector 사내 문서 검색·인덱싱 |
+| File Management | 10013 | Google Drive 파일 검색·읽기·업로드 |
+| Report Writing | 10014 | 양식 예시(`format_example`) 기반 보고서 작성 |
 
-## 보고서 작성 에이전트
+## 보고서 작성 흐름
 
-다른 에이전트에서 수집한 데이터를 지정된 양식에 맞춰 마크다운 보고서로 작성합니다.
+Orchestrator가 upstream 결과를 `[REPORT_CONTEXT]` JSON으로 Report Agent에 전달합니다.
 
-**지원 양식:**
+| 필드 | 출처 | 용도 |
+|------|------|------|
+| `format_example` | Drive 양식 파일 전문 (`test.txt` 등) | **형식·구조** 그대로 mimic |
+| `sources` (content) | `web_research` 등 | **본문**에 쓸 조사 자료 |
+| `report_topic` | 사용자 질문 | 보고서 주제 (예: SQL) |
 
-| ID | 이름 | 용도 |
-|----|------|------|
-| `executive_summary` | 임원 요약 보고서 | 핵심 결론, 권고사항 중심 |
-| `research_report` | 조사 보고서 | 웹/RAG 조사 결과 정리 |
-| `technical_report` | 기술 보고서 | 기술 분석, 아키텍처 |
-| `meeting_minutes` | 회의록 | 논의, 결정, 액션 아이템 |
-| `general` | 일반 보고서 | 범용 양식 |
+**내장 양식** (`executive_summary`, `research_report`, `technical_report`, `meeting_minutes`, `general`)은 Drive 양식 파일이 없을 때만 사용됩니다.
 
-**워크플로우 예시:**
+### 워크플로우 예시
 
 ```
 "AI 트렌드 조사 후 조사 보고서로 작성"
   → web_research → report_writing
 
-"사내 문서 검색 후 임원 보고서 작성"
-  → internal_rag → report_writing
-
-"조사 → 보고서 → Drive 저장"
-  → web_research → report_writing → file_management
+"test.txt 양식 참고해서 SQL 보고서 작성하고 Drive에 저장"
+  → file_management (test.txt 읽기)
+  → web_research (SQL 조사)
+  → report_writing (양식 mimic + SQL 본문)
+  → file_management (Drive 저장)
 ```
+
+> `report_writing`은 upstream 완료 **후** 실행되어야 합니다. `plan_normalizer`가 `depends_on`을 자동 보정합니다.
 
 ## 환경 설정
 
@@ -66,7 +66,7 @@
 pip install -r requirements.txt
 ```
 
-### 2. 환경 변수 설정 (.env)
+### 2. 환경 변수 (.env)
 
 ```bash
 copy .env.example .env
@@ -77,27 +77,45 @@ OPENAI_API_KEY=your_openai_key
 TAVILY_API_KEY=your_tavily_key
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_key
+
+# 에이전트 URL (선택, 기본값 localhost)
+ORCHESTRATOR_AGENT_URL=http://localhost:10010
+WEB_AGENT_URL=http://localhost:10011
+RAG_AGENT_URL=http://localhost:10012
+FILE_AGENT_URL=http://localhost:10013
 REPORT_AGENT_URL=http://localhost:10014
-# credentials.json 파일 필요 (Google Cloud Console에서 발급)
 ```
+
+Google Drive 연동 시 `ai_llm/file_management_agent/credentials.json`이 필요합니다.
 
 ## 실행 방법
 
-### 방법 1: 일괄 시작 (Windows)
+### 에이전트 일괄 시작 (Windows)
 
 ```bash
 python start_agents.py
+python start_agents.py --agent report   # 특정 에이전트만
 ```
 
-모든 에이전트를 별도 콘솔 창에서 시작합니다. 이후 FastAPI 백엔드를 실행합니다:
+### FastAPI 백엔드
 
 ```bash
 python -m backend.api.main
 ```
 
-### 방법 2: 개별 시작
+기본 포트: **8000** · Swagger: http://localhost:8000/docs
 
-각 터미널에서 순서대로 실행:
+### Vue 프론트엔드
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+기본 포트: **5173**
+
+### 에이전트 개별 시작
 
 ```bash
 cd ai_llm/web_research_agent && python agent_server.py      # :10011
@@ -105,30 +123,44 @@ cd ai_llm/internal_rag_agent && python agent_server.py      # :10012
 cd ai_llm/file_management_agent && python agent_server.py   # :10013
 cd ai_llm/report_writing_agent && python agent_server.py    # :10014
 cd ai_llm/orchestrator_agent && python agent_server.py      # :10010
-python -m backend.api.main                                  # :8000
 ```
 
-### FastAPI 백엔드 API
+## FastAPI API (`backend.api.main`)
 
 | 엔드포인트 | 메서드 | 설명 |
 |-----------|--------|------|
-| `/api/health` | GET | 에이전트 상태 확인 |
-| `/api/chat` | POST | 오케스트레이터에 질문 전달 |
-| `/api/report-templates` | GET | 보고서 양식 목록 |
-| `/docs` | GET | Swagger API 문서 |
+| `/api/health` | GET | 서버 상태 |
+| `/api/chat` | POST | 오케스트레이터에 질문 (동기) |
+| `/api/chat/stream` | GET | SSE 스트리밍 (`message`, `session_id` 쿼리) |
+| `/api/sessions` | GET | 채팅 세션 목록 |
+| `/api/sessions/{id}/messages` | GET | 세션 대화 기록 |
+| `/api/files/upload` | POST | 파일 Drive 업로드 + RAG 인덱싱 |
+| `/docs` | GET | Swagger UI |
 
-**사용 예:**
+**POST /api/chat 예시:**
 
 ```bash
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"query": "AI 트렌드를 조사해서 조사 보고서로 작성해줘"}'
+  -d "{\"message\": \"AI 트렌드를 조사해서 조사 보고서로 작성해줘\"}"
 ```
 
-### CLI 테스트
+**GET /api/chat/stream 예시 (프론트엔드 사용):**
+
+```bash
+curl -N "http://localhost:8000/api/chat/stream?message=안녕하세요"
+```
+
+### CLI 테스트 (A2A 직접)
 
 ```bash
 python test_client.py
+```
+
+## 테스트
+
+```bash
+python -m pytest ai_llm -v --tb=short
 ```
 
 ## 파일 구조
@@ -138,17 +170,23 @@ CHAP11_final-project/
 ├── README.md
 ├── requirements.txt
 ├── start_agents.py             # 에이전트 일괄 시작
-├── test_client.py              # CLI 테스트 클라이언트
-├── .github/                    # CI, PR/Issue 템플릿
+├── stop_agents.py
+├── test_client.py              # A2A CLI 테스트
 ├── backend/
-│   ├── main.py                 # 레거시 FastAPI 게이트웨이 (:8000)
-│   └── api/                    # REST API (세션, 채팅, 파일 업로드)
+│   ├── main.py                 # (레거시) 이전 FastAPI 게이트웨이 — 사용하지 않음
+│   └── api/                    # 현재 REST API (main.py)
+│       ├── main.py
+│       └── routers/            # chat, sessions, files
 ├── frontend/                   # Vue.js 웹 UI
-├── common/                     # 공통 스키마, 설정, A2A 클라이언트
+├── common/                     # A2A 클라이언트 래퍼 등
+├── docs/                       # 에이전트 평가·설계 문서
 └── ai_llm/
+    ├── shared/                   # ReportContext 등 공통 계약
     ├── orchestrator_agent/     # Host Agent (:10010)
-    ├── web_research_agent/     # Remote Agent (:10011)
-    ├── internal_rag_agent/     # Remote Agent (:10012)
-    ├── file_management_agent/  # Remote Agent (:10013)
-    └── report_writing_agent/   # Remote Agent (:10014)
+    │   ├── plan_normalizer.py
+    │   └── report_context_builder.py
+    ├── web_research_agent/     # (:10011)
+    ├── internal_rag_agent/     # (:10012)
+    ├── file_management_agent/  # (:10013)
+    └── report_writing_agent/   # (:10014)
 ```
