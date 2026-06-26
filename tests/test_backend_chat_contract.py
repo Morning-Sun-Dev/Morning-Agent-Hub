@@ -5,6 +5,87 @@ from common.schemas import AgentResponse
 from backend.api.contract_adapter import build_chat_response
 
 
+class _FakeSupabaseResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakeSupabaseQuery:
+    def __init__(self, client, table_name):
+        self.client = client
+        self.table_name = table_name
+        self.operation = "select"
+        self.payload = None
+        self.eq_field = None
+        self.eq_value = None
+
+    def select(self, *_args):
+        self.operation = "select"
+        return self
+
+    def eq(self, field, value):
+        self.eq_field = field
+        self.eq_value = value
+        return self
+
+    def limit(self, *_args):
+        return self
+
+    def insert(self, payload):
+        self.operation = "insert"
+        self.payload = payload
+        return self
+
+    def execute(self):
+        if self.operation == "insert":
+            self.client.inserted.append((self.table_name, self.payload))
+            if self.table_name == "chat_sessions":
+                self.client.session_ids.add(self.payload["id"])
+            return _FakeSupabaseResult([self.payload])
+
+        if self.table_name == "chat_sessions" and self.eq_field == "id":
+            if self.eq_value in self.client.session_ids:
+                return _FakeSupabaseResult([{"id": self.eq_value}])
+            return _FakeSupabaseResult([])
+
+        return _FakeSupabaseResult([])
+
+
+class _FakeSupabaseClient:
+    def __init__(self, session_ids=None):
+        self.session_ids = set(session_ids or [])
+        self.inserted = []
+
+    def table(self, table_name):
+        return _FakeSupabaseQuery(self, table_name)
+
+
+def test_ensure_session_creates_missing_client_session(monkeypatch):
+    from backend.api.routers import chat as chat_router
+
+    fake_supabase = _FakeSupabaseClient()
+    monkeypatch.setattr(chat_router, "get_supabase", lambda: fake_supabase)
+
+    session_id = chat_router._ensure_session_sync("client-session-1", "요즘 개발 트렌드")
+
+    assert session_id == "client-session-1"
+    assert fake_supabase.inserted == [
+        ("chat_sessions", {"id": "client-session-1", "title": "요즘 개발 트렌드"})
+    ]
+
+
+def test_ensure_session_reuses_existing_client_session(monkeypatch):
+    from backend.api.routers import chat as chat_router
+
+    fake_supabase = _FakeSupabaseClient(session_ids={"client-session-1"})
+    monkeypatch.setattr(chat_router, "get_supabase", lambda: fake_supabase)
+
+    session_id = chat_router._ensure_session_sync("client-session-1", "요즘 개발 트렌드")
+
+    assert session_id == "client-session-1"
+    assert fake_supabase.inserted == []
+
+
 def test_build_chat_response_preserves_trace_sources_and_files():
     agent_response = AgentResponse(
         success=True,
