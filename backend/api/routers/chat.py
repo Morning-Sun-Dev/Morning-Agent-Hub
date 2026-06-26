@@ -88,14 +88,14 @@ async def _save_message(session_id, role, content):
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     session_id = await _ensure_session(req.session_id, req.message)
-    history = await _load_history(session_id)
-    prompt = f"[이전 대화]\n{history}\n\n[현재 질문]\n{req.message}" if history else req.message
+    await _load_history(session_id)  # 세션 유효성 확인용 (오케스트레이터에는 전달하지 않음)
 
     await _save_message(session_id, "user", req.message)
 
     try:
         client = await get_a2a_client()
-        response = await client.send_message("orchestrator", prompt)
+        # 현재 질문만 전달 — 이력을 함께 보내면 RAG 벡터 검색 쿼리가 오염됨
+        response = await client.send_message("orchestrator", req.message)
 
         if not response.success:
             raise HTTPException(status_code=500, detail=response.error)
@@ -119,15 +119,15 @@ async def chat_stream(message: str, session_id: str | None = None):
         try:
             # Supabase 작업을 스레드에서 실행
             resolved_id = await _ensure_session(session_id, message)
-            history = await _load_history(resolved_id)
-            prompt = f"[이전 대화]\n{history}\n\n[현재 질문]\n{message}" if history else message
+            await _load_history(resolved_id)  # 세션 유효성 확인용 (오케스트레이터에는 전달하지 않음)
 
             await _save_message(resolved_id, "user", message)
 
             yield f"data: {json.dumps({'type': 'status', 'state': 'working'})}\n\n"
 
             client = await get_a2a_client()
-            response = await client.send_message("orchestrator", prompt)
+            # 현재 질문만 전달 — 이력을 함께 보내면 RAG 벡터 검색 쿼리가 오염됨
+            response = await client.send_message("orchestrator", message)
 
             if not response.success:
                 yield f"data: {json.dumps({'type': 'error', 'content': response.error})}\n\n"
