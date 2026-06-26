@@ -1,6 +1,7 @@
 import sys
 import os
 from uuid import uuid4
+from typing import Any
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
@@ -30,6 +31,74 @@ class UploadResult(BaseModel):
     storage_ref: str
     index_status: str
     index_message: str
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_drive_file(file_info: dict[str, Any]) -> dict[str, Any]:
+    """Keep existing Drive keys and add UI-friendly file artifact aliases."""
+    file_item = dict(file_info)
+
+    file_id = file_item.get("file_id") or file_item.get("id")
+    storage_ref = file_item.get("storage_ref")
+    filename = file_item.get("filename") or file_item.get("name") or file_id or storage_ref or "파일"
+    mime_type = file_item.get("mime_type") or file_item.get("mimeType")
+    size = _optional_int(file_item.get("size"))
+    open_url = (
+        file_item.get("open_url")
+        or file_item.get("openUrl")
+        or file_item.get("web_view_link")
+        or file_item.get("webViewLink")
+    )
+    download_url = (
+        file_item.get("download_url")
+        or file_item.get("downloadUrl")
+        or file_item.get("web_content_link")
+        or file_item.get("webContentLink")
+    )
+
+    file_item.update(
+        {
+            "file_id": _optional_str(file_id),
+            "storage_ref": _optional_str(storage_ref),
+            "filename": _optional_str(filename),
+            "mime_type": _optional_str(mime_type),
+            "size": size,
+            "id": _optional_str(storage_ref or file_id or filename),
+            "name": _optional_str(filename),
+            "kind": file_item.get("kind") or "drive",
+            "status": file_item.get("status")
+            or ("downloadable" if open_url or download_url else "pending"),
+            "open_url": _optional_str(open_url),
+            "download_url": _optional_str(download_url),
+        }
+    )
+    return file_item
+
+
+def _download_action(file_item: dict[str, Any]) -> dict[str, Any]:
+    download_url = file_item.get("download_url")
+    open_url = file_item.get("open_url")
+    action_url = download_url or open_url
+    return {
+        "available": bool(action_url),
+        "method": "open_url",
+        "url": action_url,
+        "fallback_open_url": open_url,
+    }
 
 
 @router.post("/files/upload", response_model=UploadResult)
@@ -96,7 +165,48 @@ async def list_files():
     try:
         gdrive = get_gdrive_client()
         files = gdrive.list_files()
-        return {"files": files}
+        normalized_files = [
+            _normalize_drive_file(file_item)
+            for file_item in files
+            if isinstance(file_item, dict)
+        ]
+        return {"files": normalized_files, "count": len(normalized_files)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/files/{file_id}")
+async def get_file_info(file_id: str):
+    """Google Drive 파일 메타데이터 조회"""
+    try:
+        gdrive = get_gdrive_client()
+        file_info = gdrive.get_file_info(file_id)
+        if file_info is None:
+            raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
+
+        return {"file": _normalize_drive_file(file_info)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/files/{file_id}/download")
+async def get_file_download(file_id: str):
+    """UI가 사용할 수 있는 Google Drive 다운로드 액션 조회"""
+    try:
+        gdrive = get_gdrive_client()
+        file_info = gdrive.get_file_info(file_id)
+        if file_info is None:
+            raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다")
+
+        file_item = _normalize_drive_file(file_info)
+        return {
+            "file": file_item,
+            "download": _download_action(file_item),
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

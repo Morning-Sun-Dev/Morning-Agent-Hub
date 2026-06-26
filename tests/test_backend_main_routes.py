@@ -59,6 +59,118 @@ def test_backend_main_exposes_capability_registry():
     )
 
 
+def test_backend_main_file_list_route_preserves_and_normalizes_drive_items(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    class FakeDriveClient:
+        def list_files(self):
+            return [
+                {
+                    "file_id": "drive-file-1",
+                    "storage_ref": "gdrive://file/drive-file-1",
+                    "filename": "brief.md",
+                    "mime_type": "text/markdown",
+                    "size": 42,
+                    "web_view_link": "https://drive.example/open/drive-file-1",
+                    "web_content_link": "https://drive.example/download/drive-file-1",
+                }
+            ]
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+
+    response = TestClient(backend_main.app).get("/api/files")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    file_item = payload["files"][0]
+    assert file_item["file_id"] == "drive-file-1"
+    assert file_item["filename"] == "brief.md"
+    assert file_item["id"] == "gdrive://file/drive-file-1"
+    assert file_item["name"] == "brief.md"
+    assert file_item["kind"] == "drive"
+    assert file_item["status"] == "downloadable"
+    assert file_item["open_url"] == "https://drive.example/open/drive-file-1"
+    assert file_item["download_url"] == "https://drive.example/download/drive-file-1"
+
+
+def test_backend_main_file_info_route_returns_normalized_metadata(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    class FakeDriveClient:
+        def get_file_info(self, file_id):
+            assert file_id == "drive-file-1"
+            return {
+                "file_id": "drive-file-1",
+                "storage_ref": "gdrive://file/drive-file-1",
+                "filename": "brief.md",
+                "mime_type": "text/markdown",
+                "size": 42,
+                "web_view_link": "https://drive.example/open/drive-file-1",
+                "web_content_link": "https://drive.example/download/drive-file-1",
+                "is_trashed": False,
+            }
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+
+    response = TestClient(backend_main.app).get("/api/files/drive-file-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    file_item = payload["file"]
+    assert file_item["file_id"] == "drive-file-1"
+    assert file_item["id"] == "gdrive://file/drive-file-1"
+    assert file_item["name"] == "brief.md"
+    assert file_item["kind"] == "drive"
+    assert file_item["status"] == "downloadable"
+    assert file_item["open_url"] == "https://drive.example/open/drive-file-1"
+    assert file_item["download_url"] == "https://drive.example/download/drive-file-1"
+
+
+def test_backend_main_file_info_route_returns_404_for_missing_file(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    class FakeDriveClient:
+        def get_file_info(self, file_id):
+            assert file_id == "missing-file"
+            return None
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+
+    response = TestClient(backend_main.app).get("/api/files/missing-file")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "파일을 찾을 수 없습니다"
+
+
+def test_backend_main_file_download_route_returns_ui_action_links(monkeypatch):
+    from backend.api.routers import files as files_router
+
+    class FakeDriveClient:
+        def get_file_info(self, file_id):
+            assert file_id == "drive-file-1"
+            return {
+                "file_id": "drive-file-1",
+                "storage_ref": "gdrive://file/drive-file-1",
+                "filename": "brief.md",
+                "mime_type": "text/markdown",
+                "web_view_link": "https://drive.example/open/drive-file-1",
+                "web_content_link": "https://drive.example/download/drive-file-1",
+            }
+
+    monkeypatch.setattr(files_router, "get_gdrive_client", lambda: FakeDriveClient())
+
+    response = TestClient(backend_main.app).get("/api/files/drive-file-1/download")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["file"]["id"] == "gdrive://file/drive-file-1"
+    assert payload["download"]["available"] is True
+    assert payload["download"]["url"] == "https://drive.example/download/drive-file-1"
+    assert payload["download"]["fallback_open_url"] == "https://drive.example/open/drive-file-1"
+    assert payload["download"]["method"] == "open_url"
+
+
 def test_backend_main_chat_post_dispatches_to_router_without_history(monkeypatch):
     from backend.api.routers import chat as chat_router
 
