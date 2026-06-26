@@ -1,75 +1,112 @@
+import {
+  createAttachment,
+  createMessage,
+  normalizeChatPayload,
+  normalizeFileArtifact,
+  normalizeProgress,
+  normalizeSessionMessage,
+  serializeAttachment,
+} from './models/chatModels'
+
 const BASE = '/api'
 
-// ── 채팅 ────────────────────────────────────────────
+async function parseJson(res) {
+  const payload = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(payload.detail || payload.message || `요청 실패: ${res.status}`)
+  }
+  return payload
+}
 
-export async function sendChat(message, sessionId = null) {
+export async function sendChat(message, sessionId = null, options = {}) {
   const res = await fetch(`${BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify({
+      message,
+      session_id: sessionId,
+      attachments: (options.attachments || []).map(serializeAttachment),
+      requested_capabilities: options.requestedCapabilities || [],
+    }),
   })
-  if (!res.ok) throw new Error(`채팅 오류: ${res.status}`)
-  return res.json()
+  const payload = normalizeChatPayload(await parseJson(res))
+  return {
+    sessionId: payload.sessionId,
+    message: createMessage({
+      role: 'assistant',
+      content: payload.content,
+      sources: payload.sources,
+      files: payload.files,
+      progress: payload.progress,
+      error: payload.error,
+    }),
+  }
 }
 
-/**
- * SSE 스트리밍 채팅
- * onStatus(state) — 진행 상태 콜백
- * onAnswer(text, sessionId) — 답변 텍스트 콜백
- * onDone() — 완료 콜백
- */
-export function streamChat(message, sessionId, { onStatus, onAnswer, onDone, onError }) {
+export function streamChat(message, sessionId, handlers = {}, options = {}) {
   const params = new URLSearchParams({ message })
   if (sessionId) params.append('session_id', sessionId)
+  if (options.attachments?.length) {
+    params.append('attachments', JSON.stringify(options.attachments.map(serializeAttachment)))
+  }
+  if (options.requestedCapabilities?.length) {
+    params.append('requested_capabilities', JSON.stringify(options.requestedCapabilities))
+  }
 
   const es = new EventSource(`${BASE}/chat/stream?${params}`)
 
   es.onmessage = (e) => {
     if (e.data === '[DONE]') {
       es.close()
-      onDone?.()
+      handlers.onDone?.()
       return
     }
     try {
       const payload = JSON.parse(e.data)
-      if (payload.type === 'status') onStatus?.(payload.state)
-      if (payload.type === 'answer') onAnswer?.(payload.content, payload.session_id)
+      if (payload.type === 'status') {
+        handlers.onProgress?.(
+          normalizeProgress({
+            stage: payload.stage || 'orchestrator',
+            message: payload.message || '작업 중',
+            state: payload.state || 'working',
+          }),
+        )
+      }
+      if (payload.type === 'answer') {
+        handlers.onAnswer?.(normalizeChatPayload(payload))
+      }
       if (payload.type === 'error') {
         es.close()
-        onError?.(payload.content)
+        handlers.onError?.(payload.content || '연결이 끊겼습니다')
       }
-    } catch {}
+    } catch {
+      handlers.onError?.('응답을 해석하지 못했습니다')
+    }
   }
 
   es.onerror = () => {
     es.close()
-    onError?.('연결이 끊겼습니다')
+    handlers.onError?.('연결이 끊겼습니다')
   }
 
-  return () => es.close() // 취소 함수 반환
+  return () => es.close()
 }
-
-// ── 세션 ────────────────────────────────────────────
 
 export async function getSessions() {
   const res = await fetch(`${BASE}/sessions`)
-  if (!res.ok) throw new Error(`세션 조회 오류: ${res.status}`)
-  return res.json()
+  return parseJson(res)
 }
 
 export async function getMessages(sessionId) {
   const res = await fetch(`${BASE}/sessions/${sessionId}/messages`)
-  if (!res.ok) throw new Error(`메시지 조회 오류: ${res.status}`)
-  return res.json()
+  const rows = await parseJson(res)
+  return rows.map(normalizeSessionMessage)
 }
 
 export async function deleteSession(sessionId) {
   const res = await fetch(`${BASE}/sessions/${sessionId}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error(`세션 삭제 오류: ${res.status}`)
-  return res.json()
+  return parseJson(res)
 }
-
-// ── 파일 ────────────────────────────────────────────
 
 export async function uploadFile(file) {
   const formData = new FormData()
@@ -78,9 +115,10 @@ export async function uploadFile(file) {
     method: 'POST',
     body: formData,
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || `업로드 오류: ${res.status}`)
-  }
-  return res.json()
+  return createAttachment(await parseJson(res), file)
+}
+
+export async function listFiles() {
+  const payload = await parseJson(await fetch(`${BASE}/files`))
+  return (payload.files || []).map(normalizeFileArtifact)
 }

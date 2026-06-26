@@ -7,6 +7,7 @@ from typing import AsyncIterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
@@ -110,6 +111,18 @@ def _sse_data(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _json_list_param(value: str | None, field_name: str) -> list:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field_name} 파라미터가 JSON 배열이 아닙니다.") from exc
+    if not isinstance(parsed, list):
+        raise ValueError(f"{field_name} 파라미터는 JSON 배열이어야 합니다.")
+    return parsed
+
+
 def _answer_event_payload(chat_response: ChatResponse, session_id: str) -> dict:
     return {
         "type": "answer",
@@ -157,7 +170,12 @@ async def chat(req: ChatRequest):
 
 
 @router.get("/chat/stream")
-async def chat_stream(message: str, session_id: str | None = None):
+async def chat_stream(
+    message: str,
+    session_id: str | None = None,
+    attachments: str | None = None,
+    requested_capabilities: str | None = None,
+):
     """SSE 스트리밍"""
 
     async def generate() -> AsyncIterator[str]:
@@ -165,7 +183,16 @@ async def chat_stream(message: str, session_id: str | None = None):
             # Supabase 작업을 스레드에서 실행
             resolved_id = await _ensure_session(session_id, message)
             history = await _load_history(resolved_id)
-            prompt = _build_prompt(ChatRequest(message=message, session_id=resolved_id), history)
+            req = ChatRequest(
+                message=message,
+                session_id=resolved_id,
+                attachments=_json_list_param(attachments, "attachments"),
+                requested_capabilities=_json_list_param(
+                    requested_capabilities,
+                    "requested_capabilities",
+                ),
+            )
+            prompt = _build_prompt(req, history)
 
             await _save_message(resolved_id, "user", message)
 
@@ -191,6 +218,8 @@ async def chat_stream(message: str, session_id: str | None = None):
 
             yield _sse_data(_answer_event_payload(chat_response, resolved_id))
 
+        except (ValueError, ValidationError) as e:
+            yield _sse_data({"type": "error", "content": str(e)})
         except Exception as e:
             yield _sse_data({"type": "error", "content": str(e)})
 
