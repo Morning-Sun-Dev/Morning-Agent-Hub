@@ -2,13 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { createMessage, createProgress } from '../../models/chatModels'
 import {
+  createFolder,
   deleteFile,
+  findFolders,
   getCapabilities,
   getFileDownloadAction,
   getFileInfo,
   getReportTemplates,
   listFiles,
   streamChat,
+  updateFileName,
   uploadFile,
 } from '../../api'
 import ChatHeader from './ChatHeader.vue'
@@ -26,11 +29,13 @@ const progress = ref([])
 const sources = ref([])
 const generatedFiles = ref([])
 const driveFiles = ref([])
+const folders = ref([])
 const capabilities = ref([])
 const reportTemplates = ref([])
 const selectedTemplateId = ref('')
 const selectedCapabilityIds = ref([])
 const fileNotice = ref('')
+const folderNotice = ref('')
 const error = ref(null)
 const sessionId = ref(null)
 const lastRequest = ref(null)
@@ -100,8 +105,10 @@ function startNewChat() {
   attachments.value = []
   sources.value = []
   generatedFiles.value = []
+  folders.value = []
   progress.value = []
   fileNotice.value = ''
+  folderNotice.value = ''
   error.value = null
   runState.value = 'idle'
   sessionId.value = null
@@ -286,10 +293,13 @@ function isBusy() {
 }
 
 function updateDriveFile(fileId, updates) {
-  driveFiles.value = driveFiles.value.map((file) => {
+  const applyUpdates = (file) => {
     if (fileActionId(file) !== fileId) return file
     return { ...file, ...updates }
-  })
+  }
+  driveFiles.value = driveFiles.value.map(applyUpdates)
+  attachments.value = attachments.value.map(applyUpdates)
+  generatedFiles.value = generatedFiles.value.map(applyUpdates)
 }
 
 function fileActionId(file) {
@@ -322,6 +332,26 @@ async function prepareFileDownload(fileId) {
   }
 }
 
+async function renameDriveFile(fileId) {
+  const currentFile = [...driveFiles.value, ...attachments.value, ...generatedFiles.value]
+    .find((file) => fileActionId(file) === fileId)
+  const nextName = globalThis.prompt
+    ? globalThis.prompt('새 파일 이름', currentFile?.name || '')
+    : ''
+  const trimmedName = nextName?.trim()
+  if (!trimmedName || trimmedName === currentFile?.name) return
+
+  try {
+    const file = await updateFileName(fileId, trimmedName)
+    updateDriveFile(fileId, file)
+    fileNotice.value = '파일 이름을 변경했습니다.'
+    activePanel.value = 'files'
+  } catch (err) {
+    fileNotice.value = err.message || '파일 이름을 변경하지 못했습니다.'
+    activePanel.value = 'files'
+  }
+}
+
 async function deleteDriveFile(fileId) {
   const confirmed = globalThis.confirm ? globalThis.confirm('이 Drive 파일을 휴지통으로 이동할까요?') : true
   if (!confirmed) return
@@ -335,6 +365,31 @@ async function deleteDriveFile(fileId) {
     activePanel.value = 'files'
   } catch (err) {
     fileNotice.value = err.message || '파일을 삭제하지 못했습니다.'
+    activePanel.value = 'files'
+  }
+}
+
+async function findDriveFolder(name) {
+  try {
+    folders.value = await findFolders(name)
+    folderNotice.value = folders.value.length
+      ? `${folders.value.length}개 폴더를 찾았습니다.`
+      : '일치하는 폴더가 없습니다.'
+    activePanel.value = 'files'
+  } catch (err) {
+    folderNotice.value = err.message || '폴더를 조회하지 못했습니다.'
+    activePanel.value = 'files'
+  }
+}
+
+async function createDriveFolder(name) {
+  try {
+    const folder = await createFolder(name)
+    folders.value = [folder, ...folders.value.filter((item) => item.id !== folder.id)]
+    folderNotice.value = '폴더를 생성했습니다.'
+    activePanel.value = 'files'
+  } catch (err) {
+    folderNotice.value = err.message || '폴더를 생성하지 못했습니다.'
     activePanel.value = 'files'
   }
 }
@@ -387,12 +442,17 @@ onBeforeUnmount(() => {
           mobile-collapsed
           :sources="sources"
           :files="panelFiles"
+          :folders="folders"
           :progress="progress"
           :capabilities="capabilities"
           :file-notice="fileNotice"
+          :folder-notice="folderNotice"
           @inspect-file="inspectFile"
           @prepare-download="prepareFileDownload"
+          @rename-file="renameDriveFile"
           @delete-file="deleteDriveFile"
+          @find-folder="findDriveFolder"
+          @create-folder="createDriveFolder"
           @select-capability="applyCapability"
         />
 
@@ -418,12 +478,17 @@ onBeforeUnmount(() => {
         class="desktop-evidence"
         :sources="sources"
         :files="panelFiles"
+        :folders="folders"
         :progress="progress"
         :capabilities="capabilities"
         :file-notice="fileNotice"
+        :folder-notice="folderNotice"
         @inspect-file="inspectFile"
         @prepare-download="prepareFileDownload"
+        @rename-file="renameDriveFile"
         @delete-file="deleteDriveFile"
+        @find-folder="findDriveFolder"
+        @create-folder="createDriveFolder"
         @select-capability="applyCapability"
       />
 

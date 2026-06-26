@@ -6,7 +6,7 @@ const props = defineProps({
   file: { type: Object, required: true },
 })
 
-const emit = defineEmits(['inspect', 'prepare-download', 'delete'])
+const emit = defineEmits(['inspect', 'prepare-download', 'rename', 'delete'])
 
 const downloadUrl = computed(() => safeUrl(props.file.downloadUrl || props.file.download_url))
 const openUrl = computed(() => safeUrl(props.file.openUrl || props.file.open_url))
@@ -40,6 +40,15 @@ const canDelete = computed(() => ['drive', 'uploaded'].includes(props.file.kind)
       </button>
       <a v-if="downloadUrl" :href="downloadUrl">열기</a>
       <a v-else-if="openUrl" :href="openUrl" target="_blank" rel="noreferrer">열기</a>
+      <button
+        v-if="canDelete"
+        type="button"
+        data-testid="file-rename-button"
+        :disabled="!fileActionId"
+        @click="emit('rename', fileActionId)"
+      >
+        이름 변경
+      </button>
       <button
         v-if="canDelete"
         type="button"
