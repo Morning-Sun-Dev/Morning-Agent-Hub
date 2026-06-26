@@ -3,7 +3,7 @@ import os
 from uuid import uuid4
 from typing import Any
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from pydantic import BaseModel
 
 # 프로젝트 루트 경로 추가
@@ -31,6 +31,15 @@ class UploadResult(BaseModel):
     storage_ref: str
     index_status: str
     index_message: str
+
+
+class UpdateFileRequest(BaseModel):
+    name: str | None = None
+
+
+class CreateFolderRequest(BaseModel):
+    name: str
+    parent_folder_id: str | None = None
 
 
 def _optional_str(value: Any) -> str | None:
@@ -99,6 +108,34 @@ def _download_action(file_item: dict[str, Any]) -> dict[str, Any]:
         "url": action_url,
         "fallback_open_url": open_url,
     }
+
+
+def _normalize_drive_folder(folder_info: dict[str, Any]) -> dict[str, Any]:
+    """Keep Drive folder keys and add UI-friendly aliases."""
+    folder_item = dict(folder_info)
+    folder_id = folder_item.get("folder_id") or folder_item.get("file_id") or folder_item.get("id")
+    storage_ref = folder_item.get("storage_ref")
+    folder_name = folder_item.get("folder_name") or folder_item.get("name") or folder_id or "폴더"
+    open_url = (
+        folder_item.get("open_url")
+        or folder_item.get("openUrl")
+        or folder_item.get("web_view_link")
+        or folder_item.get("webViewLink")
+    )
+
+    folder_item.update(
+        {
+            "folder_id": _optional_str(folder_id),
+            "storage_ref": _optional_str(storage_ref),
+            "folder_name": _optional_str(folder_name),
+            "id": _optional_str(storage_ref or folder_id or folder_name),
+            "name": _optional_str(folder_name),
+            "kind": "folder",
+            "status": folder_item.get("status") or "ready",
+            "open_url": _optional_str(open_url),
+        }
+    )
+    return folder_item
 
 
 @router.post("/files/upload", response_model=UploadResult)
@@ -175,6 +212,44 @@ async def list_files():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/folders")
+async def find_folders(name: str = Query("")):
+    """Google Drive 폴더 이름 검색"""
+    folder_name = name.strip()
+    if not folder_name:
+        raise HTTPException(status_code=400, detail="폴더명을 입력하세요")
+
+    try:
+        gdrive = get_gdrive_client()
+        folders = gdrive.find_folder_by_name(folder_name)
+        normalized_folders = [
+            _normalize_drive_folder(folder)
+            for folder in folders
+            if isinstance(folder, dict)
+        ]
+        return {"folders": normalized_folders, "count": len(normalized_folders)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/folders")
+async def create_folder(payload: CreateFolderRequest):
+    """Google Drive 폴더 생성"""
+    folder_name = payload.name.strip()
+    if not folder_name:
+        raise HTTPException(status_code=400, detail="폴더명을 입력하세요")
+
+    try:
+        gdrive = get_gdrive_client()
+        folder = gdrive.create_folder(
+            folder_name,
+            parent_folder_id=payload.parent_folder_id,
+        )
+        return {"folder": _normalize_drive_folder(folder), "message": "폴더 생성 완료"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/files/{file_id}")
 async def get_file_info(file_id: str):
     """Google Drive 파일 메타데이터 조회"""
@@ -187,6 +262,21 @@ async def get_file_info(file_id: str):
         return {"file": _normalize_drive_file(file_info)}
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/files/{file_id}")
+async def update_file(file_id: str, payload: UpdateFileRequest):
+    """Google Drive 파일 이름 변경"""
+    new_name = payload.name.strip() if payload.name else ""
+    if not new_name:
+        raise HTTPException(status_code=400, detail="변경할 파일명을 입력하세요")
+
+    try:
+        gdrive = get_gdrive_client()
+        file_info = gdrive.update_file(file_id, new_name=new_name)
+        return {"file": _normalize_drive_file(file_info), "message": "파일 이름 변경 완료"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -73,6 +73,18 @@ export function normalizeFileArtifact(file = {}) {
   }
 }
 
+export function normalizeFolder(folder = {}) {
+  return {
+    id: folder.id || folder.storage_ref || folder.storageRef || folder.folder_id || folder.folderId || fallbackId('folder'),
+    folderId: folder.folder_id || folder.folderId || folder.file_id || folder.fileId || null,
+    name: folder.folder_name || folder.folderName || folder.name || '폴더',
+    storageRef: folder.storage_ref || folder.storageRef || null,
+    status: folder.status || 'ready',
+    openUrl: safeUrl(folder.open_url || folder.openUrl || folder.web_view_link),
+    createdAt: folder.created_at || folder.createdAt || null,
+  }
+}
+
 export function normalizeProgress(item = {}) {
   const rawState = item.state || item.status || 'working'
   const state = {

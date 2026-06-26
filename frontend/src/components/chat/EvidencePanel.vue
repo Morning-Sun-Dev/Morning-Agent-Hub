@@ -7,9 +7,11 @@ import SourceCard from './SourceCard.vue'
 const props = defineProps({
   sources: { type: Array, default: () => [] },
   files: { type: Array, default: () => [] },
+  folders: { type: Array, default: () => [] },
   progress: { type: Array, default: () => [] },
   capabilities: { type: Array, default: () => [] },
   fileNotice: { type: String, default: '' },
+  folderNotice: { type: String, default: '' },
   activeTab: { type: String, default: 'sources' },
   mobileCollapsed: { type: Boolean, default: false },
 })
@@ -18,13 +20,17 @@ const emit = defineEmits([
   'update:activeTab',
   'inspect-file',
   'prepare-download',
+  'rename-file',
   'delete-file',
+  'find-folder',
+  'create-folder',
   'select-capability',
 ])
 const expanded = ref(false)
+const folderName = ref('')
 const showMobileSummary = computed(() => props.mobileCollapsed && !expanded.value)
 const itemCount = computed(() => (
-  props.sources.length + props.files.length + props.progress.length + props.capabilities.length
+  props.sources.length + props.files.length + props.folders.length + props.progress.length + props.capabilities.length
 ))
 
 const tabs = [
@@ -42,6 +48,16 @@ const uiStatusLabel = {
 
 function statusLabel(status) {
   return uiStatusLabel[status] || '예정'
+}
+
+function submitFolderSearch() {
+  const name = folderName.value.trim()
+  if (name) emit('find-folder', name)
+}
+
+function submitFolderCreate() {
+  const name = folderName.value.trim()
+  if (name) emit('create-folder', name)
 }
 </script>
 
@@ -93,6 +109,31 @@ function statusLabel(status) {
         </div>
 
         <div v-if="activeTab === 'files'" class="panel-stack">
+          <form class="folder-tools" aria-label="Drive 폴더 작업" @submit.prevent="submitFolderSearch">
+            <input
+              v-model="folderName"
+              type="text"
+              placeholder="폴더명"
+              aria-label="폴더명"
+              data-testid="folder-name-input"
+            >
+            <button type="button" data-testid="folder-find-button" @click="submitFolderSearch">
+              폴더 조회
+            </button>
+            <button type="button" data-testid="folder-create-button" @click="submitFolderCreate">
+              폴더 생성
+            </button>
+          </form>
+          <div v-if="folderNotice" class="file-notice" role="status">{{ folderNotice }}</div>
+          <div v-if="folders.length" class="folder-results" aria-label="폴더 결과">
+            <article v-for="folder in folders" :key="folder.id || folder.name" class="folder-row">
+              <div>
+                <strong>{{ folder.name }}</strong>
+                <span>{{ folder.folderId || folder.storageRef }}</span>
+              </div>
+              <a v-if="folder.openUrl" :href="folder.openUrl" target="_blank" rel="noreferrer">열기</a>
+            </article>
+          </div>
           <div v-if="fileNotice" class="file-notice" role="status">{{ fileNotice }}</div>
           <div v-if="files.length === 0" class="empty-panel">
             <span>f</span>
@@ -106,6 +147,7 @@ function statusLabel(status) {
             :file="file"
             @inspect="emit('inspect-file', $event)"
             @prepare-download="emit('prepare-download', $event)"
+            @rename="emit('rename-file', $event)"
             @delete="emit('delete-file', $event)"
           />
         </div>
@@ -283,6 +325,76 @@ p {
   font-weight: 800;
 }
 
+.folder-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+}
+
+.folder-tools input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--m001-border);
+  border-radius: var(--m001-radius-control);
+  background: white;
+  color: var(--m001-text);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 10px;
+}
+
+.folder-tools button,
+.folder-row a {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--m001-border-strong);
+  border-radius: var(--m001-radius-control);
+  background: white;
+  color: var(--m001-text);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.folder-results {
+  display: grid;
+  gap: 8px;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--m001-border);
+  border-radius: var(--m001-radius-card);
+  background: var(--m001-panel-subtle);
+}
+
+.folder-row div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.folder-row strong {
+  overflow: hidden;
+  color: var(--m001-text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-row span {
+  overflow: hidden;
+  color: var(--m001-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .capability-card > div,
 .capability-card footer {
   display: flex;
@@ -403,6 +515,16 @@ p {
 
   .empty-panel {
     min-height: 160px;
+  }
+}
+
+@media (max-width: 520px) {
+  .folder-tools {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .folder-tools button {
+    width: 100%;
   }
 }
 </style>

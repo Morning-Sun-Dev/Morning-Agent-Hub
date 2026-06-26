@@ -72,11 +72,40 @@ describe('EvidencePanel', () => {
 
     await wrapper.get('[data-testid="file-info-button"]').trigger('click')
     await wrapper.get('[data-testid="file-download-button"]').trigger('click')
+    await wrapper.get('[data-testid="file-rename-button"]').trigger('click')
     await wrapper.get('[data-testid="file-delete-button"]').trigger('click')
 
     expect(wrapper.emitted('inspect-file')).toEqual([['drive-file-1']])
     expect(wrapper.emitted('prepare-download')).toEqual([['drive-file-1']])
+    expect(wrapper.emitted('rename-file')).toEqual([['drive-file-1']])
     expect(wrapper.emitted('delete-file')).toEqual([['drive-file-1']])
+  })
+
+  it('emits folder search and create actions from the file panel', async () => {
+    const wrapper = mount(EvidencePanel, {
+      props: {
+        sources: [],
+        files: [],
+        folders: [{
+          id: 'gdrive://file/folder-1',
+          folderId: 'folder-1',
+          name: 'reports',
+          openUrl: 'https://drive.example/folders/folder-1',
+        }],
+        progress: [],
+        activeTab: 'files',
+        folderNotice: '1개 폴더를 찾았습니다.',
+      },
+    })
+
+    await wrapper.get('[data-testid="folder-name-input"]').setValue('reports')
+    await wrapper.get('[data-testid="folder-find-button"]').trigger('click')
+    await wrapper.get('[data-testid="folder-create-button"]').trigger('click')
+
+    expect(wrapper.text()).toContain('reports')
+    expect(wrapper.text()).toContain('1개 폴더를 찾았습니다.')
+    expect(wrapper.emitted('find-folder')).toEqual([['reports']])
+    expect(wrapper.emitted('create-folder')).toEqual([['reports']])
   })
 
   it('emits capability quick actions from the capability panel', async () => {

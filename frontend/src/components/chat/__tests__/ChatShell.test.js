@@ -1,19 +1,24 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  createFolder,
   deleteFile,
+  findFolders,
   getCapabilities,
   getFileDownloadAction,
   getFileInfo,
   getReportTemplates,
   listFiles,
   streamChat,
+  updateFileName,
   uploadFile,
 } from '../../../api'
 import ChatShell from '../ChatShell.vue'
 
 vi.mock('../../../api', () => ({
+  createFolder: vi.fn(),
   deleteFile: vi.fn(),
+  findFolders: vi.fn(),
   getCapabilities: vi.fn(),
   getFileDownloadAction: vi.fn(),
   getFileInfo: vi.fn(),
@@ -21,6 +26,7 @@ vi.mock('../../../api', () => ({
   listFiles: vi.fn(),
   uploadFile: vi.fn(),
   streamChat: vi.fn(),
+  updateFileName: vi.fn(),
 }))
 
 describe('ChatShell', () => {
@@ -83,6 +89,27 @@ describe('ChatShell', () => {
     deleteFile.mockResolvedValue({
       file_id: 'drive-file-1',
       deleted: true,
+    })
+    updateFileName.mockResolvedValue({
+      id: 'gdrive://file/a',
+      fileId: 'drive-file-1',
+      name: 'renamed.md',
+      kind: 'drive',
+      status: 'ready',
+    })
+    findFolders.mockResolvedValue([
+      {
+        id: 'gdrive://file/folder-1',
+        folderId: 'folder-1',
+        name: 'reports',
+        openUrl: 'https://drive.example/folders/folder-1',
+      },
+    ])
+    createFolder.mockResolvedValue({
+      id: 'gdrive://file/folder-2',
+      folderId: 'folder-2',
+      name: 'new reports',
+      openUrl: null,
     })
     streamChat.mockImplementation((_message, _sessionId, handlers) => {
       handlers.onProgress({ stage: 'orchestrator', message: '작업 중', state: 'working' })
@@ -262,6 +289,43 @@ describe('ChatShell', () => {
     expect(deleteFile).toHaveBeenCalledWith('drive-file-1')
     expect(wrapper.text()).toContain('파일을 휴지통으로 이동했습니다.')
     expect(wrapper.text()).not.toContain('brief.md')
+  })
+
+  it('renames a drive file from the file panel after confirmation', async () => {
+    vi.stubGlobal('prompt', vi.fn(() => 'renamed.md'))
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '파일').trigger('click')
+    await wrapper.get('[data-testid="file-rename-button"]').trigger('click')
+    await flushPromises()
+
+    expect(prompt).toHaveBeenCalledWith('새 파일 이름', 'brief.md')
+    expect(updateFileName).toHaveBeenCalledWith('drive-file-1', 'renamed.md')
+    expect(wrapper.text()).toContain('파일 이름을 변경했습니다.')
+    expect(wrapper.text()).toContain('renamed.md')
+  })
+
+  it('finds and creates Drive folders from the file panel', async () => {
+    const wrapper = mount(ChatShell)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '파일').trigger('click')
+    await wrapper.get('[data-testid="folder-name-input"]').setValue('reports')
+    await wrapper.get('[data-testid="folder-find-button"]').trigger('click')
+    await flushPromises()
+
+    expect(findFolders).toHaveBeenCalledWith('reports')
+    expect(wrapper.text()).toContain('1개 폴더를 찾았습니다.')
+    expect(wrapper.text()).toContain('reports')
+
+    await wrapper.get('[data-testid="folder-name-input"]').setValue('new reports')
+    await wrapper.get('[data-testid="folder-create-button"]').trigger('click')
+    await flushPromises()
+
+    expect(createFolder).toHaveBeenCalledWith('new reports')
+    expect(wrapper.text()).toContain('폴더를 생성했습니다.')
+    expect(wrapper.text()).toContain('new reports')
   })
 
   it('turns a capability quick action into a requested chat capability', async () => {
