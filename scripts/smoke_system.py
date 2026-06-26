@@ -16,8 +16,12 @@ from urllib.error import HTTPError, URLError
 REQUIRED_CAPABILITY_IDS = {
     "route_request",
     "web_search",
+    "news_search",
+    "url_fetch",
     "rag_vector_search",
     "upload_file",
+    "list_files",
+    "download_file",
     "write_report",
 }
 
@@ -127,8 +131,40 @@ def validate_stream_events(events: list[dict[str, Any]]) -> CheckResult:
         return CheckResult("chat_stream", "fail", "missing non-empty answer event")
 
     answer = answers[-1]
+    required_fields = {
+        "session_id",
+        "run_id",
+        "status",
+        "sources",
+        "files",
+        "progress",
+        "artifacts",
+        "error",
+    }
+    missing = sorted(required_fields - answer.keys())
+    if missing:
+        return CheckResult(
+            "chat_stream",
+            "fail",
+            f"answer event missing structured fields: {', '.join(missing)}",
+        )
+
+    list_fields = ("sources", "files", "progress", "artifacts")
+    invalid_lists = [
+        field
+        for field in list_fields
+        if not isinstance(answer.get(field), list)
+    ]
+    if invalid_lists:
+        return CheckResult(
+            "chat_stream",
+            "fail",
+            f"answer event fields are not lists: {', '.join(invalid_lists)}",
+        )
+
     status = answer.get("status") or "completed"
-    return CheckResult("chat_stream", "pass", f"answer event received with status={status}")
+    run_id = answer.get("run_id") or "(missing)"
+    return CheckResult("chat_stream", "pass", f"answer event received with status={status}, run_id={run_id}")
 
 
 def validate_health_payload(payload: Any) -> CheckResult:
@@ -169,6 +205,7 @@ def run_smoke(
     message: str,
     file_path: Path | None = None,
     skip_chat: bool = False,
+    requested_capabilities: list[str] | None = None,
 ) -> list[CheckResult]:
     checks: list[CheckResult] = []
     checks.append(_capture("health", lambda: validate_health_payload(client.get_json("/api/health"))))
@@ -194,12 +231,15 @@ def run_smoke(
         )
 
     if not skip_chat:
+        query = {"message": message}
+        if requested_capabilities:
+            query["requested_capabilities"] = json.dumps(requested_capabilities, ensure_ascii=False)
         checks.append(
             _capture(
                 "chat_stream",
                 lambda: validate_stream_events(
                     parse_sse_events(
-                        client.get_text("/api/chat/stream", {"message": message})
+                        client.get_text("/api/chat/stream", query)
                     )
                 ),
             )
@@ -233,6 +273,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--message", default="안녕하세요. 현재 시스템 상태를 짧게 알려줘.")
     parser.add_argument("--file", type=Path, default=None)
     parser.add_argument("--skip-chat", action="store_true")
+    parser.add_argument(
+        "--capability",
+        action="append",
+        default=[],
+        help="Capability id to include in the chat stream smoke request. Repeatable.",
+    )
     parser.add_argument("--json", action="store_true", dest="json_output")
     parser.add_argument("--timeout", type=float, default=120.0)
     return parser.parse_args(argv)
@@ -246,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         message=args.message,
         file_path=args.file,
         skip_chat=args.skip_chat,
+        requested_capabilities=args.capability,
     )
 
     if args.json_output:

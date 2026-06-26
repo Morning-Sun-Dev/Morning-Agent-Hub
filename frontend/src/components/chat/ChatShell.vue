@@ -447,7 +447,6 @@ onBeforeUnmount(() => {
             <h2>단일 챗봇</h2>
             <p>텍스트 요청, 파일 첨부, 웹 근거 확인, 산출물 다운로드를 한 화면에서 처리합니다.</p>
           </div>
-          <span>M-001</span>
         </header>
 
         <MessageList
@@ -584,21 +583,6 @@ p {
   color: var(--m001-muted);
   font-size: 12px;
   line-height: 18px;
-}
-
-.workspace-heading span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 58px;
-  height: 24px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: var(--m001-primary-soft);
-  color: var(--m001-primary);
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
 }
 
 .composer-wrap {
